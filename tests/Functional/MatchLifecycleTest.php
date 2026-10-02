@@ -36,6 +36,61 @@ final class MatchLifecycleTest extends TestCase
         self::assertSame([['id' => 'bob', 'score' => 0, 'handCount' => 7]], $view['opponents']);
     }
 
+    /**
+     * The request most likely to be retried: a child taps "new match", the response
+     * is slow, and they tap again. Before this, that made two matches and left one
+     * of them orphaned.
+     */
+    public function testRetryingACreateReturnsTheSameMatchRatherThanASecond(): void
+    {
+        $first = $this->createMatch('tapped-twice');
+        $second = $this->createMatch('tapped-twice');
+
+        self::assertSame(201, $second->getStatusCode());
+        self::assertSame(
+            $this->app->json($first)['matchId'],
+            $this->app->json($second)['matchId'],
+        );
+        self::assertCount(1, $this->app->matches->allMatchIds(), 'Only one match exists.');
+    }
+
+    public function testADifferentKeyMakesADifferentMatch(): void
+    {
+        $this->createMatch('first-tap');
+        $this->createMatch('a-genuinely-new-match');
+
+        self::assertCount(2, $this->app->matches->allMatchIds());
+    }
+
+    /** A retry sees the match as it is now, not as it was when it was created. */
+    public function testAReplayedCreateReflectsPlayThatHappenedSince(): void
+    {
+        $created = $this->app->json($this->createMatch('tapped-twice'));
+        $matchId = $created['matchId'];
+
+        $this->app->request(
+            'POST',
+            sprintf('/v1/matches/%s/commands', $matchId),
+            ['type' => 'forfeit'],
+            $this->app->authAs('alice') + ['Idempotency-Key' => 'cmd-1'],
+        );
+
+        $replayed = $this->app->json($this->createMatch('tapped-twice'));
+
+        self::assertSame($matchId, $replayed['matchId']);
+        self::assertSame('ended', $replayed['phase']);
+    }
+
+    public function testCreatingAMatchNeedsAnIdempotencyKey(): void
+    {
+        $response = $this->app->request('POST', '/v1/matches', [
+            'deckVersionId' => 'starter@1',
+            'playerIds' => ['alice', 'bob'],
+        ], $this->app->authAs('alice'), validateRequest: false);
+
+        self::assertSame(400, $response->getStatusCode());
+    }
+
     public function testTheSeedIsNeverAcceptedFromAClient(): void
     {
         // Sending a seed does not make it the seed: the field is not read anywhere.
@@ -43,7 +98,7 @@ final class MatchLifecycleTest extends TestCase
             'deckVersionId' => 'starter@1',
             'playerIds' => ['alice', 'bob'],
             'seed' => 1,
-        ], $this->app->authAs('alice'), validateRequest: false);
+        ], $this->app->authAs('alice') + ['Idempotency-Key' => 'create-MatchLifecycleTest-45'], validateRequest: false);
 
         $chosenByServer = $this->app->json($this->createMatch());
         $ignoredRequest = $this->app->json($withSeed);
@@ -86,7 +141,7 @@ final class MatchLifecycleTest extends TestCase
         $response = $this->app->request('POST', '/v1/matches', [
             'deckVersionId' => 'deck-does-not-exist',
             'playerIds' => ['alice', 'bob'],
-        ], $this->app->authAs('alice'));
+        ], $this->app->authAs('alice') + ['Idempotency-Key' => 'create-MatchLifecycleTest-88']);
 
         self::assertSame(404, $response->getStatusCode());
         self::assertSame('Deck version not found', $this->app->json($response)['title']);
@@ -97,12 +152,12 @@ final class MatchLifecycleTest extends TestCase
         $tooFew = $this->app->request('POST', '/v1/matches', [
             'deckVersionId' => 'starter@1',
             'playerIds' => ['alice'],
-        ], $this->app->authAs('alice'), validateRequest: false);
+        ], $this->app->authAs('alice') + ['Idempotency-Key' => 'create-MatchLifecycleTest-99'], validateRequest: false);
 
         $repeated = $this->app->request('POST', '/v1/matches', [
             'deckVersionId' => 'starter@1',
             'playerIds' => ['alice', 'alice'],
-        ], $this->app->authAs('alice'));
+        ], $this->app->authAs('alice') + ['Idempotency-Key' => 'create-MatchLifecycleTest-104']);
 
         self::assertSame(400, $tooFew->getStatusCode());
         self::assertSame(400, $repeated->getStatusCode());
@@ -113,7 +168,7 @@ final class MatchLifecycleTest extends TestCase
         $response = $this->app->request('POST', '/v1/matches', [
             'deckVersionId' => 'starter@1',
             'playerIds' => ['bob', 'carol'],
-        ], $this->app->authAs('alice'));
+        ], $this->app->authAs('alice') + ['Idempotency-Key' => 'create-MatchLifecycleTest-115']);
 
         self::assertSame(400, $response->getStatusCode());
     }
@@ -132,12 +187,11 @@ final class MatchLifecycleTest extends TestCase
         self::assertNotSame($asAlice['you'], $asBob['you']);
     }
 
-    private function createMatch(): \Psr\Http\Message\ResponseInterface
+    private function createMatch(string $key = 'create-default'): \Psr\Http\Message\ResponseInterface
     {
         return $this->app->request('POST', '/v1/matches', [
             'deckVersionId' => 'starter@1',
             'playerIds' => ['alice', 'bob'],
-        ], $this->app->authAs('alice'));
+        ], $this->app->authAs('alice') + ['Idempotency-Key' => $key]);
     }
-
 }

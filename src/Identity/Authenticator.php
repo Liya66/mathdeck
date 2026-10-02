@@ -20,23 +20,37 @@ final readonly class Authenticator
         private AccountStore $accounts,
         private PasswordHasher $hasher,
         private TokenIssuer $tokens,
+        private SignInThrottle $throttle,
     ) {
     }
 
-    /** @throws AuthenticationFailed */
-    public function signIn(string $playerId, string $passcode): Token
+    /**
+     * @throws AuthenticationFailed
+     * @throws \MathDeck\Identity\Exception\TooManyAttempts
+     */
+    public function signIn(string $playerId, string $passcode, ?string $clientAddress = null): Token
     {
+        // Before the hash check, not after: the point is to stop the work, and a
+        // throttle that still verifies every guess is a rate limit on the response
+        // rather than on the attack.
+        $this->throttle->check($playerId, $clientAddress);
+
         $account = $this->accounts->find($playerId);
 
         if ($account === null) {
             $this->hasher->verify($passcode, self::DECOY_HASH);
+            $this->throttle->recordFailure($playerId, $clientAddress);
 
             throw AuthenticationFailed::credentials();
         }
 
         if (!$this->hasher->verify($passcode, $account->passwordHash)) {
+            $this->throttle->recordFailure($playerId, $clientAddress);
+
             throw AuthenticationFailed::credentials();
         }
+
+        $this->throttle->recordSuccess($playerId);
 
         if ($this->hasher->needsRehash($account->passwordHash)) {
             $this->accounts->save(new Account(

@@ -164,7 +164,7 @@ final class DeckAuthoringTest extends TestCase
         $response = $this->app->request('POST', '/v1/matches', [
             'deckVersionId' => 'deck-1@1',
             'playerIds' => ['miss-lee', 'bob'],
-        ], $this->app->authAs('miss-lee'));
+        ], $this->app->authAs('miss-lee') + ['Idempotency-Key' => 'create-DeckAuthoringTest-166']);
 
         self::assertSame(404, $response->getStatusCode());
 
@@ -173,7 +173,7 @@ final class DeckAuthoringTest extends TestCase
         $afterPublishing = $this->app->request('POST', '/v1/matches', [
             'deckVersionId' => 'deck-1@1',
             'playerIds' => ['miss-lee', 'bob'],
-        ], $this->app->authAs('miss-lee'));
+        ], $this->app->authAs('miss-lee') + ['Idempotency-Key' => 'create-DeckAuthoringTest-175']);
 
         self::assertSame(201, $afterPublishing->getStatusCode());
     }

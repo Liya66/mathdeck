@@ -29,6 +29,7 @@ final readonly class MatchRepository
         DeckRules $rules,
         array $playerIds,
         \DateTimeImmutable $createdAt,
+        ?string $creationKey = null,
     ): MatchState {
         $this->matches->save(new MatchRecord(
             matchId: $matchId,
@@ -37,9 +38,18 @@ final readonly class MatchRepository
             playerIds: $playerIds,
             rules: $rules,
             createdAt: $createdAt,
+            creationKey: $creationKey,
         ));
 
         return $this->openingPosition($matchId);
+    }
+
+    /** The match a previous request with this key created, if there was one. */
+    public function findByCreationKey(string $creationKey): ?MatchState
+    {
+        $record = $this->matches->findByCreationKey($creationKey);
+
+        return $record === null ? null : $this->load($record->matchId);
     }
 
     public function load(string $matchId): MatchState

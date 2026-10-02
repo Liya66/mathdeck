@@ -61,6 +61,16 @@ paths:
                   expiresAt: { type: string, format: date-time }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
+        '429':
+          description: |
+            Too many failed attempts, counted per account and per client address.
+            Not a 401 — the credentials were never examined.
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
 
   /v1/matches:
     post:
@@ -70,7 +80,15 @@ paths:
         The seed is minted by the server and never accepted from a client: a client
         that chooses the seed knows the deck order before a card is dealt.
 
-        Not idempotent. A retried request creates a second match.
+        `Idempotency-Key` is required. A retry with the same key returns the match
+        the first attempt created rather than a second one — this is the request
+        most likely to be retried, because a child who taps "new match" and sees
+        nothing taps it again.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, maxLength: 64 }
       requestBody:
         required: true
         content:

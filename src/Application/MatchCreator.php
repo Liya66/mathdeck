@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MathDeck\Application;
 
+use MathDeck\Application\Exception\DuplicateMatchCreation;
 use MathDeck\Application\Port\DeckCatalog;
 use MathDeck\Application\Port\MatchIdentityFactory;
 use MathDeck\Engine\Clock;
@@ -19,8 +20,35 @@ final readonly class MatchCreator
     ) {
     }
 
+    /**
+     * Idempotent on the creation key.
+     *
+     * Commands have carried an idempotency key since phase 4; creation was the one
+     * write that did not — and it is the request most likely to be retried, because
+     * a child who taps "new match" and sees nothing taps it again.
+     *
+     * @param list<string> $playerIds
+     */
+    public function create(string $deckVersionId, array $playerIds, string $creationKey): MatchState
+    {
+        $existing = $this->repository->findByCreationKey($creationKey);
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        try {
+            return $this->createNew($deckVersionId, $playerIds, $creationKey);
+        } catch (DuplicateMatchCreation) {
+            // Another copy of the same request won the race between the check above
+            // and the insert. Read back what it made.
+            return $this->repository->findByCreationKey($creationKey)
+                ?? throw new \RuntimeException('Lost a creation race to a match that then vanished.');
+        }
+    }
+
     /** @param list<string> $playerIds */
-    public function create(string $deckVersionId, array $playerIds): MatchState
+    private function createNew(string $deckVersionId, array $playerIds, string $creationKey): MatchState
     {
         return $this->repository->create(
             matchId: $this->identity->newMatchId(),
@@ -31,6 +59,7 @@ final readonly class MatchCreator
             seed: $this->identity->newSeed(),
             playerIds: $playerIds,
             createdAt: $this->clock->now(),
+            creationKey: $creationKey,
         );
     }
 }

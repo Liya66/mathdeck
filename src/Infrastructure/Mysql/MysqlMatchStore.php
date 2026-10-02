@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MathDeck\Infrastructure\Mysql;
 
+use MathDeck\Application\Exception\DuplicateMatchCreation;
 use MathDeck\Application\MatchRecord;
 use MathDeck\Application\Port\MatchStore;
 use MathDeck\Engine\State\DeckRules;
@@ -18,31 +19,50 @@ final readonly class MysqlMatchStore implements MatchStore
 
     public function save(MatchRecord $record): void
     {
-        $statement = $this->connection->prepare(
-            'INSERT INTO matches (match_id, deck_version_id, seed, player_ids, rules, created_at)
-             VALUES (:match_id, :deck_version_id, :seed, :player_ids, :rules, :created_at)',
-        );
+        try {
+            $statement = $this->connection->prepare(
+                'INSERT INTO matches (match_id, creation_key, deck_version_id, seed, player_ids, rules, created_at)
+                 VALUES (:match_id, :creation_key, :deck_version_id, :seed, :player_ids, :rules, :created_at)',
+            );
 
-        $statement->execute([
-            'match_id' => $record->matchId,
-            'deck_version_id' => $record->deckVersionId,
-            'seed' => $record->seed,
-            'player_ids' => json_encode($record->playerIds, JSON_THROW_ON_ERROR),
-            'rules' => json_encode($record->rules->toArray(), JSON_THROW_ON_ERROR),
-            'created_at' => $record->createdAt->format(self::TIMESTAMP_FORMAT),
-        ]);
+            $statement->execute([
+                'match_id' => $record->matchId,
+                'creation_key' => $record->creationKey,
+                'deck_version_id' => $record->deckVersionId,
+                'seed' => $record->seed,
+                'player_ids' => json_encode($record->playerIds, JSON_THROW_ON_ERROR),
+                'rules' => json_encode($record->rules->toArray(), JSON_THROW_ON_ERROR),
+                'created_at' => $record->createdAt->format(self::TIMESTAMP_FORMAT),
+            ]);
+        } catch (\PDOException $failure) {
+            // Same pattern as the event store: a unique index decides the race, and
+            // the loser reads back what the winner wrote.
+            if ($failure->getCode() === '23000' && $record->creationKey !== null) {
+                throw DuplicateMatchCreation::of($record->creationKey);
+            }
+
+            throw $failure;
+        }
     }
 
     public function find(string $matchId): ?MatchRecord
     {
-        $statement = $this->connection->prepare(
-            'SELECT match_id, deck_version_id, seed, player_ids, rules, created_at
-             FROM matches WHERE match_id = :match_id',
-        );
+        $statement = $this->connection->prepare('SELECT * FROM matches WHERE match_id = :match_id');
         $statement->execute(['match_id' => $matchId]);
 
-        $row = $statement->fetch(\PDO::FETCH_ASSOC);
+        return self::hydrate($statement->fetch(\PDO::FETCH_ASSOC));
+    }
 
+    public function findByCreationKey(string $creationKey): ?MatchRecord
+    {
+        $statement = $this->connection->prepare('SELECT * FROM matches WHERE creation_key = :creation_key');
+        $statement->execute(['creation_key' => $creationKey]);
+
+        return self::hydrate($statement->fetch(\PDO::FETCH_ASSOC));
+    }
+
+    private static function hydrate(mixed $row): ?MatchRecord
+    {
         if (!is_array($row)) {
             return null;
         }
@@ -54,6 +74,7 @@ final readonly class MysqlMatchStore implements MatchStore
             playerIds: self::decodeStringList((string) $row['player_ids']),
             rules: DeckRules::fromArray(self::decodeMap((string) $row['rules'])),
             createdAt: new \DateTimeImmutable((string) $row['created_at'], new \DateTimeZone('UTC')),
+            creationKey: $row['creation_key'] === null ? null : (string) $row['creation_key'],
         );
     }
 

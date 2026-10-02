@@ -7,10 +7,13 @@ namespace MathDeck\Tests\Unit\Identity;
 use MathDeck\Identity\AccountFactory;
 use MathDeck\Identity\Authenticator;
 use MathDeck\Identity\Exception\AuthenticationFailed;
+use MathDeck\Identity\Exception\TooManyAttempts;
 use MathDeck\Identity\PasswordHasher;
+use MathDeck\Identity\SignInThrottle;
 use MathDeck\Identity\Role;
 use MathDeck\Identity\TokenIssuer;
 use MathDeck\Infrastructure\InMemory\InMemoryAccountStore;
+use MathDeck\Infrastructure\InMemory\InMemorySignInAttempts;
 use MathDeck\Tests\Support\FrozenClock;
 use PHPUnit\Framework\TestCase;
 
@@ -18,11 +21,13 @@ final class AuthenticatorTest extends TestCase
 {
     private InMemoryAccountStore $accounts;
     private Authenticator $authenticator;
+    private InMemorySignInAttempts $attempts;
 
     protected function setUp(): void
     {
         $clock = new FrozenClock();
         $hasher = new PasswordHasher();
+        $this->attempts = new InMemorySignInAttempts();
 
         $this->accounts = new InMemoryAccountStore();
         $this->accounts->save(
@@ -33,6 +38,7 @@ final class AuthenticatorTest extends TestCase
             $this->accounts,
             $hasher,
             new TokenIssuer('a-secret-long-enough-to-be-taken-seriously', $clock),
+            new SignInThrottle($this->attempts, $clock, maxPerAccount: 3, maxPerAddress: 5),
         );
     }
 
@@ -68,6 +74,67 @@ final class AuthenticatorTest extends TestCase
 
         self::assertNotNull($wrongPasscode);
         self::assertSame($wrongPasscode, $unknownAccount);
+    }
+
+    /**
+     * Classroom passcodes are short and memorable by design — `play-1234` falls to
+     * a few thousand guesses. The throttle is what makes that choice defensible.
+     */
+    public function testGuessingIsCutOffAfterAFewTries(): void
+    {
+        for ($attempt = 0; $attempt < 3; ++$attempt) {
+            try {
+                $this->authenticator->signIn('alice', 'guess', '10.0.0.1');
+            } catch (AuthenticationFailed) {
+                // Expected: three wrong guesses are allowed through.
+            }
+        }
+
+        $this->expectException(TooManyAttempts::class);
+
+        $this->authenticator->signIn('alice', 'guess', '10.0.0.1');
+    }
+
+    /** Even the right passcode is refused once the budget is spent. */
+    public function testTheCorrectPasscodeIsAlsoRefusedWhileThrottled(): void
+    {
+        for ($attempt = 0; $attempt < 3; ++$attempt) {
+            try {
+                $this->authenticator->signIn('alice', 'guess', '10.0.0.1');
+            } catch (AuthenticationFailed) {
+                // Spending the budget.
+            }
+        }
+
+        $this->expectException(TooManyAttempts::class);
+
+        $this->authenticator->signIn('alice', 'open-sesame', '10.0.0.1');
+    }
+
+    /** A fumbled passcode followed by the right one must not leave a mark. */
+    public function testSigningInSuccessfullyClearsTheAccountsBudget(): void
+    {
+        try {
+            $this->authenticator->signIn('alice', 'guess', '10.0.0.1');
+        } catch (AuthenticationFailed) {
+            // One slip.
+        }
+
+        $this->authenticator->signIn('alice', 'open-sesame', '10.0.0.1');
+
+        $refusals = [];
+
+        for ($attempt = 0; $attempt < 3; ++$attempt) {
+            try {
+                $this->authenticator->signIn('alice', 'guess', '10.0.0.1');
+            } catch (\RuntimeException $failure) {
+                $refusals[] = $failure::class;
+            }
+        }
+
+        // Three more guesses were judged on the passcode, not cut off by the
+        // throttle — which is what "the budget was cleared" means.
+        self::assertSame(array_fill(0, 3, AuthenticationFailed::class), $refusals);
     }
 
     public function testThePasscodeIsNeverStored(): void

@@ -29,6 +29,7 @@ use MathDeck\Authoring\Port\DeckStore;
 use MathDeck\Engine\Clock;
 use MathDeck\Engine\SystemClock;
 use MathDeck\Identity\Port\AccountStore;
+use MathDeck\Identity\Port\SignInAttempts;
 use MathDeck\Identity\TokenIssuer;
 use MathDeck\Infrastructure\Analytics\AccountPseudonymResolver;
 use MathDeck\Infrastructure\Deck\PublishedDeckCatalog;
@@ -40,6 +41,7 @@ use MathDeck\Infrastructure\Mysql\MysqlDeckStore;
 use MathDeck\Infrastructure\Mysql\MysqlEventStore;
 use MathDeck\Infrastructure\Mysql\MysqlMatchStore;
 use MathDeck\Infrastructure\Mysql\MysqlProjectionCursors;
+use MathDeck\Infrastructure\Mysql\MysqlSignInAttempts;
 use MathDeck\Infrastructure\Mysql\MysqlReportQueries;
 use MathDeck\Infrastructure\Random\RandomMatchIdentityFactory;
 use Psr\Container\ContainerInterface;
@@ -70,6 +72,9 @@ $builder->addDefinitions([
         $c->get(PDO::class),
     ),
     AccountStore::class => static fn (ContainerInterface $c): AccountStore => new MysqlAccountStore(
+        $c->get(PDO::class),
+    ),
+    SignInAttempts::class => static fn (ContainerInterface $c): SignInAttempts => new MysqlSignInAttempts(
         $c->get(PDO::class),
     ),
     PseudonymResolver::class => static fn (ContainerInterface $c): PseudonymResolver => new AccountPseudonymResolver(

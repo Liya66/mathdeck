@@ -346,6 +346,25 @@ role as a signed claim, so a student cannot become a teacher by editing anything
 they hold. There is a test that sends `Bearer alice` — exactly what worked for four
 phases — and asserts a 401.
 
+**Sign-in is throttled.** Classroom passcodes are short and memorable by design —
+`play-1234` falls to a few thousand guesses — so a throttle is what makes that
+choice defensible rather than negligent. Two buckets, and a breach of either
+answers `429` with a `Retry-After`: per account, which stops someone grinding at
+one child's passcode, and per client address, which stops the same attacker
+spraying one guess across every account instead. A success clears the account's
+bucket but deliberately not the address's, so guessing one account correctly does
+not refund the budget being spent against all the others.
+
+The address comes from the **last** `X-Forwarded-For` hop, the one Nginx itself
+appended — the leftmost entry is whatever the client chose to send, and trusting it
+would let an attacker mint a fresh bucket per guess.
+
+**Match creation is idempotent.** Commands have carried an idempotency key since
+phase 4; creation was the one write that did not, and it is the request most likely
+to be retried — a child taps "new match", sees nothing, and taps again. Same
+mechanism as the event store: a unique index on `matches.creation_key`, and the
+loser of the race reads back what the winner wrote.
+
 **Sign-in failures are indistinguishable.** "No such account" and "wrong passcode"
 return the same 401 with the same wording, and the authenticator verifies against a
 decoy hash when no account exists so the two paths take similar time. Otherwise the
@@ -463,8 +482,8 @@ stays fast and dependency-free. When the variable *is* set and the database does
 answer, they fail rather than skip — a silently skipped integration suite is how CI
 goes green without ever touching a database.
 
-Current state: **285 PHP tests (2390 assertions) and 46 JavaScript tests**, 95.9%
-line coverage, **90% mutation score** on the engine, rules and analytics; clean at
+Current state: **310 PHP tests (2443 assertions) and 46 JavaScript tests**, 95.7%
+line coverage, **91% mutation score** on the engine, rules and analytics; clean at
 PHPStan level 8, zero deptrac violations.
 
 Migrations are applied by `bin/migrate`, not by MySQL's init directory: init scripts
@@ -503,6 +522,7 @@ Built:
 - [x] Signed expiring tokens, hashed passcodes, role-gated class reports
 - [x] Pseudonymous analytics keys, resolved only for a teacher
 - [x] Mutation testing, coverage gate, CI, production image, security headers
+- [x] Throttled sign-in, idempotent match creation
 
 Not here yet:
 
@@ -510,9 +530,7 @@ Not here yet:
 - Token revocation. Tokens are self-contained, so signing out is a client-side
   discard; a stolen token stays valid until it expires. Short lifetimes, not
   revocation, are the current answer.
-- Rate limiting on sign-in. Nothing slows down a passcode guesser yet.
 - Account management: `bin/seed-demo` is the only way to create an account.
-- Idempotent match creation — a retried `POST /v1/matches` makes a second match
 - Live updates are polled every 1.5s, not pushed; websockets or SSE would be the
   fix, and are not worth it until someone complains
 

@@ -18,9 +18,9 @@ use Psr\Http\Server\RequestHandlerInterface;
  * making it optional would mean a client that forgets can double-play a hand on a
  * retry, and the class of bug that produces is very hard to see from the logs.
  *
- * Scoped to the commands route rather than every POST. Match creation is not yet
- * idempotent — a retried create makes a second match — and demanding the header
- * there would promise a guarantee nothing honours.
+ * Applied per route rather than to every POST, so a route only demands the header
+ * once it can actually honour it. Both writes that create something now do:
+ * commands since phase 4, match creation since phase 8.
  */
 final readonly class IdempotencyKeyMiddleware implements MiddlewareInterface
 {

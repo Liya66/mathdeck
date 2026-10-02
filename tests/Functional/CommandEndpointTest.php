@@ -244,7 +244,7 @@ final class CommandEndpointTest extends TestCase
         $this->app->request('POST', '/v1/matches', [
             'deckVersionId' => 'starter@1',
             'playerIds' => ['alice', 'bob'],
-        ], $this->app->authAs('alice'));
+        ], $this->app->authAs('alice') + ['Idempotency-Key' => 'create-1']);
     }
 
 }

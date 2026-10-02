@@ -28,7 +28,7 @@ final class AnalyticsTest extends TestCase
         $this->app->request('POST', '/v1/matches', [
             'deckVersionId' => 'starter@1',
             'playerIds' => ['alice', 'bob'],
-        ], $this->app->authAs('alice'));
+        ], $this->app->authAs('alice') + ['Idempotency-Key' => 'create-1']);
 
         // Time passes while a learner thinks. Latency is measured server-side from
         // the moment the turn opened, so this is what the report will see.

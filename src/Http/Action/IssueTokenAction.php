@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MathDeck\Http\Action;
 
+use MathDeck\Http\ClientAddress;
 use MathDeck\Http\Json;
 use MathDeck\Http\Request\Body;
 use MathDeck\Identity\Authenticator;
@@ -16,6 +17,9 @@ use Psr\Http\Message\ServerRequestInterface;
  * Failures are deliberately indistinguishable: "no such account" and "wrong
  * passcode" return the same 401 with the same wording, or the endpoint becomes a
  * way to find out who has an account.
+ *
+ * Throttled per account and per client address; too many failures answer 429 with
+ * a Retry-After rather than another guess.
  */
 final readonly class IssueTokenAction
 {
@@ -31,7 +35,11 @@ final readonly class IssueTokenAction
     ): ResponseInterface {
         $body = Body::of($request);
 
-        $token = $this->authenticator->signIn($body->string('playerId'), $body->string('passcode'));
+        $token = $this->authenticator->signIn(
+            $body->string('playerId'),
+            $body->string('passcode'),
+            ClientAddress::of($request),
+        );
 
         return Json::write($response, [
             'token' => $token->value,

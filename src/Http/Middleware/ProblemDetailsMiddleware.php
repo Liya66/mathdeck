@@ -16,6 +16,7 @@ use MathDeck\Http\Exception\BadRequest;
 use MathDeck\Http\Exception\Forbidden;
 use MathDeck\Http\Exception\Unauthenticated;
 use MathDeck\Identity\Exception\AuthenticationFailed;
+use MathDeck\Identity\Exception\TooManyAttempts;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -60,6 +61,16 @@ final readonly class ProblemDetailsMiddleware implements MiddlewareInterface
             // Signing in failed. The message is deliberately the same whether the
             // account does not exist or the passcode was wrong.
             $failure instanceof AuthenticationFailed => [401, 'Sign-in failed', $failure->getMessage(), []],
+
+            // Not a 401: the credentials were never examined. Saying so, with a
+            // Retry-After, is also the honest answer for a client that is simply
+            // misbehaving rather than attacking.
+            $failure instanceof TooManyAttempts => [
+                429,
+                'Too many attempts',
+                $failure->getMessage(),
+                ['retryAfter' => $failure->retryAfterSeconds],
+            ],
             $failure instanceof PlayerNotInMatch => [403, 'Not a player in this match', $failure->getMessage(), []],
             $failure instanceof Forbidden => [403, 'Forbidden', $failure->getMessage(), []],
             $failure instanceof DeckVersionNotFound => [404, 'Deck version not found', $failure->getMessage(), []],
@@ -121,6 +132,10 @@ final readonly class ProblemDetailsMiddleware implements MiddlewareInterface
 
         if ($status === 503) {
             $response = $response->withHeader('Retry-After', '1');
+        }
+
+        if ($failure instanceof TooManyAttempts) {
+            $response = $response->withHeader('Retry-After', (string) $failure->retryAfterSeconds);
         }
 
         $response->getBody()->write(json_encode($body, JSON_THROW_ON_ERROR));

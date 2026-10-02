@@ -8,6 +8,7 @@ use MathDeck\Application\MatchCreator;
 use MathDeck\Application\View\MatchView;
 use MathDeck\Http\Exception\BadRequest;
 use MathDeck\Http\Json;
+use MathDeck\Http\Middleware\IdempotencyKeyMiddleware;
 use MathDeck\Http\PlayerIdentity;
 use MathDeck\Http\Request\Body;
 use Psr\Http\Message\ResponseInterface;
@@ -18,6 +19,9 @@ use Psr\Http\Message\ServerRequestInterface;
  *
  * Note what the body cannot contain: a seed. A client that picks the seed knows the
  * deck order before a card is dealt.
+ *
+ * Idempotent on the Idempotency-Key header: a retry returns the match the first
+ * attempt created rather than a second one.
  */
 final readonly class CreateMatchAction
 {
@@ -48,7 +52,13 @@ final readonly class CreateMatchAction
             throw BadRequest::because('You must be one of the players in a match you create.');
         }
 
-        $state = $this->creator->create($deckVersionId, $playerIds);
+        $creationKey = $request->getAttribute(IdempotencyKeyMiddleware::ATTRIBUTE);
+
+        if (!is_string($creationKey)) {
+            throw new \LogicException('The idempotency middleware did not run.');
+        }
+
+        $state = $this->creator->create($deckVersionId, $playerIds, $creationKey);
 
         return Json::write(
             $response->withHeader('Location', sprintf('/v1/matches/%s', $state->matchId)),

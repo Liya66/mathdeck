@@ -24,6 +24,8 @@ final readonly class MatchRecord
         public array $playerIds,
         public DeckRules $rules,
         public \DateTimeImmutable $createdAt,
+        /** The idempotency key of the request that created this match, if any. */
+        public ?string $creationKey = null,
     ) {
     }
 }

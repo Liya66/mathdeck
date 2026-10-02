@@ -41,7 +41,8 @@ final readonly class AppFactory
         $app->post('/v1/tokens', IssueTokenAction::class);
 
         $app->group('/v1', function (\Slim\Routing\RouteCollectorProxy $group): void {
-            $group->post('/matches', CreateMatchAction::class);
+            $group->post('/matches', CreateMatchAction::class)
+                ->add(new IdempotencyKeyMiddleware());
             $group->get('/matches/{matchId}', GetMatchAction::class);
             $group->post('/matches/{matchId}/commands', PostCommandAction::class)
                 ->add(new IdempotencyKeyMiddleware());

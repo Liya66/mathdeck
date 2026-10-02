@@ -10,7 +10,10 @@ interface MatchStore
 {
     public function save(MatchRecord $record): void;
 
+    /** @throws \MathDeck\Application\Exception\DuplicateMatchCreation */
     public function find(string $matchId): ?MatchRecord;
+
+    public function findByCreationKey(string $creationKey): ?MatchRecord;
 
     /**
      * Every match id, for the projection worker to sweep. Classroom scale; a

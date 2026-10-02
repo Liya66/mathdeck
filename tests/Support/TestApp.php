@@ -25,7 +25,9 @@ use MathDeck\Engine\Clock;
 use MathDeck\Identity\AccountFactory;
 use MathDeck\Identity\PasswordHasher;
 use MathDeck\Identity\Port\AccountStore;
+use MathDeck\Identity\Port\SignInAttempts;
 use MathDeck\Identity\Role;
+use MathDeck\Identity\SignInThrottle;
 use MathDeck\Identity\TokenIssuer;
 use MathDeck\Http\AppFactory;
 use MathDeck\Infrastructure\InMemory\InMemoryEventStore;
@@ -33,6 +35,7 @@ use MathDeck\Infrastructure\Analytics\AccountPseudonymResolver;
 use MathDeck\Infrastructure\Deck\PublishedDeckCatalog;
 use MathDeck\Infrastructure\InMemory\InMemoryAttemptStore;
 use MathDeck\Infrastructure\InMemory\InMemoryProjectionCursors;
+use MathDeck\Infrastructure\InMemory\InMemorySignInAttempts;
 use MathDeck\Infrastructure\InMemory\InMemoryAccountStore;
 use MathDeck\Infrastructure\InMemory\InMemoryDeckStore;
 use MathDeck\Infrastructure\InMemory\InMemoryMatchStore;
@@ -74,6 +77,7 @@ final class TestApp
     private App $app;
     private InMemoryProjectionCursors $cursors;
     public readonly InMemoryAccountStore $accounts;
+    public readonly InMemorySignInAttempts $signInAttempts;
     private TokenIssuer $tokens;
     private AccountFactory $people;
     private ValidatorBuilder $validator;
@@ -87,9 +91,13 @@ final class TestApp
         public readonly InMemoryAttemptStore $attempts = new InMemoryAttemptStore(),
         /** @var list<string> */
         public readonly array $teachers = ['miss-lee', 'mr-adeyemi'],
+        // Small enough that a test can reach the limit without paying for a dozen
+        // argon2 verifications.
+        public readonly int $maxSignInFailures = 3,
     ) {
         $this->cursors = new InMemoryProjectionCursors();
         $this->accounts = new InMemoryAccountStore();
+        $this->signInAttempts = new InMemorySignInAttempts();
         $this->tokens = new TokenIssuer(str_repeat('test-secret-', 4), $this->clock);
         $this->people = new AccountFactory(new PasswordHasher(), $this->clock);
 
@@ -109,6 +117,13 @@ final class TestApp
             AccountStore::class => $this->accounts,
             PseudonymResolver::class => new AccountPseudonymResolver($this->accounts),
             TokenIssuer::class => $this->tokens,
+            SignInAttempts::class => $this->signInAttempts,
+            SignInThrottle::class => new SignInThrottle(
+                $this->signInAttempts,
+                $this->clock,
+                maxPerAccount: $this->maxSignInFailures,
+                maxPerAddress: $this->maxSignInFailures * 3,
+            ),
             MatchIdentityFactory::class => $this->identity,
         ]);
 
