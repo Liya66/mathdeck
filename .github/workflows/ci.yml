@@ -109,10 +109,11 @@ jobs:
       # A "Class not found" fatal instead would mean the classmap is wrong again.
       - name: The image can actually run the application
         run: |
-          set -o pipefail
-          docker run --rm mathdeck-prod php bin/migrate 2>&1 \
-            | tee /dev/stderr \
-            | grep -q 'MATCHDECK_DSN is not set'
+          # bin/migrate exits non-zero on purpose when it refuses, so the pipeline's
+          # status says nothing useful. What matters is *how* it refused.
+          output=$(docker run --rm mathdeck-prod php bin/migrate 2>&1 || true)
+          echo "$output"
+          echo "$output" | grep -q 'MATCHDECK_DSN is not set'
 
       - name: Extensions and opcache are configured for production
         run: |
