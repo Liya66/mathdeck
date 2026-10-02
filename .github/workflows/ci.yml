@@ -19,7 +19,7 @@ jobs:
       - run: vendor/bin/phpstan analyse --no-progress
       # The architecture rule. Engine may depend on nothing outside itself; the day
       # that stops being true, the README's claims quietly stop being true too.
-      - run: vendor/bin/deptrac analyse --no-progress --fail-on-uncovered=false
+      - run: vendor/bin/deptrac analyse --no-progress
 
   test:
     name: Tests

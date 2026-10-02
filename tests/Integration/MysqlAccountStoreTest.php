@@ -67,7 +67,11 @@ final class MysqlAccountStoreTest extends MysqlTestCase
         $this->store->save($ada);
         $this->store->save($ben);
 
-        self::assertSame(
+        // assertEquals, not assertSame: this returns a map, and the query has no
+        // ORDER BY because a map has no order. assertSame compares key order too,
+        // which made this pass locally and fail in CI on whatever MySQL felt like
+        // returning first.
+        self::assertEquals(
             [$ada->analyticsKey => 'Ada', $ben->analyticsKey => 'Ben'],
             $this->store->displayNamesFor([$ada->analyticsKey, $ben->analyticsKey]),
         );
