@@ -471,6 +471,11 @@ Migrations are applied by `bin/migrate`, not by MySQL's init directory: init scr
 only run on a brand-new volume, so adding a migration used to mean destroying the
 database to get it.
 
+`composer.json` pins `config.platform.php` to 8.2.0. Dependencies here are installed
+through the `composer:2` image, which runs a much newer PHP — without the pin,
+Composer resolves for *that* interpreter and writes a lock file requiring a PHP this
+project does not support. Everything passed locally and CI failed on its first run.
+
 ## Scope
 
 Built:
