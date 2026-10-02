@@ -1,0 +1,49 @@
+# Caddy serves the static client and reverse-proxies the API, and obtains its own
+# TLS certificate. Nginx does this job in development; in production Caddy replaces
+# it, because certificate renewal is the part you do not want to have to remember.
+#
+# SITE_ADDRESS is the hostname in production (mathdeck.example.com) and `:80` for a
+# local smoke test — which is also how Caddy decides whether to ask for a cert.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# Site-level, and needed by both handlers. php_fastcgi resolves its try_files
+	# against this root — with it set only inside the static block, every /v1
+	# request came back as an empty 200 from Caddy because try_files had nothing to
+	# resolve against and never reached PHP. index.php lives here too, which is
+	# what try_files finds for an API path.
+	root * /srv/public
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	redir / /app/ 302
+
+	# PHP is scoped to the API rather than left as a fallback.
+	#
+	# A bare `php_fastcgi` runs before `file_server` in Caddy's directive order and
+	# its try_files does not treat a directory as a match — so `/app/` fell through
+	# to index.php and the router answered 404 for every page in the client. Saying
+	# which paths are PHP removes the guesswork: the API is all under /v1.
+	handle /v1/* {
+		php_fastcgi app:9000 {
+			root /app/public
+		}
+	}
+
+	handle {
+		# Unhashed filenames, so a deploy must not leave people on the old build.
+		# `*/` is in the list because a request for /app/ is served from index.html
+		# but matched on the request path — the entry point is precisely the file
+		# that must revalidate, and matching only *.html would have missed it.
+		@revalidate path *.js *.css *.html */
+		header @revalidate Cache-Control "no-cache"
+
+		file_server
+	}
+}

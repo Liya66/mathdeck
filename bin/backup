@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+# Backs up only what cannot be rebuilt.
+#
+# fact_attempt is deliberately excluded: it is a projection of the event log, so
+# restoring without it and clearing the cursor makes the worker rebuild every row.
+# Backing it up would double the size of the dump to store something derivable.
+#
+# Usage: bin/backup [output-directory]
+set -eu
+
+OUT="${1:-./backups}"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+FILE="$OUT/mathdeck-$STAMP.sql.gz"
+
+mkdir -p "$OUT"
+
+docker compose -f docker-compose.prod.yml exec -T mysql \
+	mysqldump \
+	--user=mathdeck \
+	--password="$MYSQL_PASSWORD" \
+	--single-transaction \
+	--no-tablespaces \
+	mathdeck \
+	accounts deck_versions matches match_events match_commands schema_migrations \
+	| gzip > "$FILE"
+
+echo "wrote $FILE ($(du -h "$FILE" | cut -f1))"
+echo
+echo "To restore: gunzip -c $FILE | docker compose -f docker-compose.prod.yml exec -T mysql mysql -umathdeck -p mathdeck"
+echo "Then clear the projection cursor and let the worker rebuild fact_attempt:"
+echo "  docker compose -f docker-compose.prod.yml exec -T mysql mysql -umathdeck -p -e \\"
+echo "    \"DELETE FROM projection_cursors WHERE projection='attempts'; DELETE FROM fact_attempt;\" mathdeck"

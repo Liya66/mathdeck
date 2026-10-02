@@ -1,0 +1,91 @@
+# Production stack. Differences from docker-compose.yml that matter:
+#
+#   - images are built from docker/prod.Dockerfile, with the source baked in and
+#     no dev tooling; nothing is bind-mounted, so a container cannot drift from
+#     the image it was built from
+#   - every secret comes from the environment, so none of them is in this file
+#   - Caddy replaces nginx and obtains its own TLS certificate
+#   - the database keeps a named volume and is never exposed to the host
+#
+# Bring it up with:  make prod-up
+
+# A distinct project name. Without it this shares containers and volumes with
+# docker-compose.yml — the service names are the same — and bringing production up
+# on a machine that also runs the development stack would quietly replace it.
+name: mathdeck-prod
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}"
+      MYSQL_DATABASE: mathdeck
+      MYSQL_USER: mathdeck
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    # Deliberately no `ports:`. The database is reachable from the other
+    # containers and from nowhere else.
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-umathdeck", "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/prod.Dockerfile
+    environment:
+      MATCHDECK_DSN: "mysql:host=mysql;dbname=mathdeck;charset=utf8mb4"
+      MATCHDECK_DB_USER: mathdeck
+      MATCHDECK_DB_PASSWORD: "${MYSQL_PASSWORD:?}"
+      MATCHDECK_TOKEN_SECRET: "${MATCHDECK_TOKEN_SECRET:?generate one with openssl rand -hex 32}"
+      # Absent on purpose. With APP_DEBUG unset, a 500 says "Something went wrong"
+      # instead of handing the exception message to whoever triggered it.
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/prod.Dockerfile
+    command: ["php", "bin/project-analytics", "--loop"]
+    environment:
+      MATCHDECK_DSN: "mysql:host=mysql;dbname=mathdeck;charset=utf8mb4"
+      MATCHDECK_DB_USER: mathdeck
+      MATCHDECK_DB_PASSWORD: "${MYSQL_PASSWORD:?}"
+      MATCHDECK_TOKEN_SECRET: "${MATCHDECK_TOKEN_SECRET:?}"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    build:
+      context: .
+      dockerfile: docker/caddy.Dockerfile
+    environment:
+      SITE_ADDRESS: "${SITE_ADDRESS:?set SITE_ADDRESS in .env, for example mathdeck.example.com}"
+    ports:
+      # Overridable so the stack can be smoke-tested on a machine where 80 is
+      # taken. In production leave them alone: Let's Encrypt validates on 80/443.
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      # Certificates survive a redeploy. Without this, every `up` asks Let's
+      # Encrypt for a new one and you meet the rate limit within a day.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  caddy-data:
+  caddy-config:

@@ -478,6 +478,20 @@ schema/              deck-v1.schema.json — served at GET /v1/deck-schema
 `config/container.php`, which sits outside `src/` precisely because a composition
 root is the one place allowed to know both sides — deptrac scans `src/`.
 
+## Deploying it
+
+[DEPLOY.md](DEPLOY.md) covers a one-instance deployment on Oracle Cloud's Always
+Free tier: `docker-compose.prod.yml` builds from `docker/prod.Dockerfile`, Caddy
+serves the client and obtains its own certificate, and every secret comes from a
+gitignored `.env`. The values in `docker-compose.yml` are development ones and are
+published here — they are not secrets and must not be reused.
+
+```bash
+make prod-up       # build, migrate, start
+make prod-deploy   # pull, build, migrate, restart
+make prod-backup   # dump what cannot be rebuilt
+```
+
 ## Running it
 
 No local PHP needed — everything runs in a container:

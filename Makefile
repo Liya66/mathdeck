@@ -3,6 +3,7 @@ RUN   := docker run --rm -v "$(PWD)":/app -w /app $(IMAGE)
 
 .PHONY: image install test coverage stan deptrac mutation check
 .PHONY: db-up db-down test-db test-integration up down logs postman test-js css migrate project seed-demo account
+.PHONY: prod-up prod-down prod-logs prod-deploy prod-migrate prod-backup
 .PHONY: local-test local-coverage local-stan
 
 ## Containerised (no local PHP needed) -----------------------------------------
@@ -110,3 +111,43 @@ account:
 # Local accounts with known passcodes. Refuses to run without the opt-in flag.
 seed-demo:
 	docker compose run --rm -e MATCHDECK_ALLOW_DEMO_SEED=1 php php bin/seed-demo
+
+## Production (docker-compose.prod.yml + .env) ------------------------------------
+
+PROD := docker compose -f docker-compose.prod.yml
+
+# Database first, then schema, then everything else. Starting the worker before
+# the tables exist makes it error-loop until migrations land — harmless, since it
+# catches and retries, but a first deploy should not greet you with a page of
+# "table doesn't exist".
+prod-up:
+	$(PROD) build
+	$(PROD) up -d --wait mysql
+	$(PROD) run --rm app php bin/migrate
+	$(PROD) up -d
+
+# Build, migrate, restart. Safe to run repeatedly; migrations are recorded.
+prod-deploy:
+	git pull --ff-only
+	$(PROD) build
+	$(PROD) up -d --wait mysql
+	$(PROD) run --rm app php bin/migrate
+	$(PROD) up -d
+	$(PROD) ps
+
+prod-migrate:
+	$(PROD) run --rm app php bin/migrate
+
+prod-down:
+	$(PROD) down
+
+prod-logs:
+	$(PROD) logs -f app worker caddy
+
+prod-backup:
+	$(PROD) run --rm -T app true >/dev/null 2>&1 || true
+	sh bin/backup
+
+# bin/create-account <playerId> "<Name>" [student|teacher] [passcode]
+prod-account:
+	$(PROD) run --rm app php bin/create-account $(ARGS)
