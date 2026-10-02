@@ -43,10 +43,12 @@ final readonly class MysqlAccountStore implements AccountStore
 
         $row = $statement->fetch(\PDO::FETCH_ASSOC);
 
-        if (!is_array($row)) {
-            return null;
-        }
+        return is_array($row) ? self::hydrate($row) : null;
+    }
 
+    /** @param array<string, mixed> $row */
+    private static function hydrate(array $row): Account
+    {
         return new Account(
             playerId: (string) $row['player_id'],
             displayName: (string) $row['display_name'],
@@ -55,6 +57,19 @@ final readonly class MysqlAccountStore implements AccountStore
             analyticsKey: (string) $row['analytics_key'],
             createdAt: new \DateTimeImmutable((string) $row['created_at'], new \DateTimeZone('UTC')),
         );
+    }
+
+    public function all(): array
+    {
+        $statement = $this->connection->query('SELECT * FROM accounts ORDER BY player_id ASC');
+        $accounts = [];
+
+        /** @var array<string, mixed> $row */
+        foreach ($statement === false ? [] : $statement->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $accounts[] = self::hydrate($row);
+        }
+
+        return $accounts;
     }
 
     public function displayNamesFor(array $analyticsKeys): array

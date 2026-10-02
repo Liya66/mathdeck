@@ -467,6 +467,126 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
 
+  /v1/accounts:
+    get:
+      summary: The class list
+      operationId: listAccounts
+      description: Teachers only. No hash and no analytics key are ever returned.
+      responses:
+        '200':
+          description: Every account
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accounts]
+                properties:
+                  accounts:
+                    type: array
+                    items: { $ref: '#/components/schemas/Account' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      summary: Add a child to the class
+      operationId: createAccount
+      description: |
+        Teachers only, and **students only** — a teacher cannot create another
+        teacher, so no account can grant its own level of access to someone else.
+        Teacher accounts are made with `bin/create-account` on the machine.
+
+        The passcode is returned exactly once, here. It is stored only as a hash,
+        so nothing can recover it later; a teacher who loses it issues a new one.
+        Omit it and a memorable one is generated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId, displayName]
+              properties:
+                playerId:
+                  type: string
+                  description: 3–32 characters of lowercase letters, digits and dashes.
+                displayName: { type: string, maxLength: 120 }
+                passcode: { type: string, minLength: 8, maxLength: 128 }
+      responses:
+        '201':
+          description: Created. The passcode is shown once and never again.
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountWithPasscode' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/accounts/me/passcode:
+    put:
+      summary: Change your own passcode
+      operationId: changeOwnPasscode
+      description: |
+        Requires the current passcode, and is throttled on the same buckets as
+        signing in — it checks a credential, so without that it would be an
+        unthrottled way to guess one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPasscode, newPasscode]
+              properties:
+                currentPasscode: { type: string }
+                newPasscode: { type: string, minLength: 8, maxLength: 128 }
+      responses:
+        '200':
+          description: Changed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [changed]
+                properties:
+                  changed: { type: boolean }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+
+  /v1/accounts/{playerId}/passcode:
+    post:
+      summary: Issue a new passcode for someone who forgot theirs
+      operationId: resetPasscode
+      description: |
+        Teachers only. Issues a new passcode rather than revealing the old, because
+        the old was never stored. Also clears that account's sign-in throttle — a
+        child who has just locked themselves out guessing is exactly who this is for.
+      parameters:
+        - name: playerId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                passcode: { type: string, minLength: 8, maxLength: 128 }
+      responses:
+        '200':
+          description: A new passcode, shown once
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountWithPasscode' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -829,3 +949,26 @@ components:
         count: { type: integer }
         medianLatencyMs: { type: integer }
         p90LatencyMs: { type: integer }
+
+    Account:
+      type: object
+      required: [playerId, displayName, role, createdAt]
+      properties:
+        playerId: { type: string }
+        displayName: { type: string }
+        role:
+          type: string
+          enum: [student, teacher]
+        createdAt: { type: string, format: date-time }
+
+    AccountWithPasscode:
+      allOf:
+        - $ref: '#/components/schemas/Account'
+        - type: object
+          required: [passcode]
+          properties:
+            passcode:
+              type: string
+              description: |
+                Shown once, on creation or reset. Stored only as a hash, so no
+                later request can return it.

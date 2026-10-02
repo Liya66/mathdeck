@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MathDeck\Http;
 
+use MathDeck\Http\Action\ChangeOwnPasscodeAction;
+use MathDeck\Http\Action\CreateAccountAction;
 use MathDeck\Http\Action\CreateDeckAction;
 use MathDeck\Http\Action\CreateMatchAction;
 use MathDeck\Http\Action\ForkDeckAction;
@@ -13,8 +15,10 @@ use MathDeck\Http\Action\GetEventsAction;
 use MathDeck\Http\Action\GetMatchAction;
 use MathDeck\Http\Action\IssueTokenAction;
 use MathDeck\Http\Action\LintDeckAction;
+use MathDeck\Http\Action\ListAccountsAction;
 use MathDeck\Http\Action\ListDecksAction;
 use MathDeck\Http\Action\PublishDeckAction;
+use MathDeck\Http\Action\ResetPasscodeAction;
 use MathDeck\Http\Action\ErrorsReportAction;
 use MathDeck\Http\Action\LatencyReportAction;
 use MathDeck\Http\Action\OverviewReportAction;
@@ -58,6 +62,13 @@ final readonly class AppFactory
             $group->put('/decks/{deckVersionId}', UpdateDeckAction::class);
             $group->post('/decks/{deckVersionId}/publish', PublishDeckAction::class);
             $group->post('/decks/{deckVersionId}/fork', ForkDeckAction::class);
+
+            // Accounts. A teacher provisions the class; everyone may change their
+            // own passcode. `me` is declared first so no player id can shadow it.
+            $group->put('/accounts/me/passcode', ChangeOwnPasscodeAction::class);
+            $group->get('/accounts', ListAccountsAction::class);
+            $group->post('/accounts', CreateAccountAction::class);
+            $group->post('/accounts/{playerId}/passcode', ResetPasscodeAction::class);
 
             // Teacher reports. Read-only, and read only from the projections.
             $group->get('/reports/overview', OverviewReportAction::class);

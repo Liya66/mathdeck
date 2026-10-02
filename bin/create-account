@@ -1,0 +1,50 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Creates an account from the command line.
+ *
+ * This is the only way to make a *teacher*, and deliberately so: the API lets a
+ * teacher provision students but never another teacher, so no account can grant its
+ * own level of access to someone else. The first teacher is therefore made here, by
+ * somebody with access to the machine — which is the bootstrapping story for every
+ * system that refuses privilege escalation through its own API.
+ *
+ * Usage:
+ *   bin/create-account <playerId> "<Display Name>" [student|teacher] [passcode]
+ */
+
+require dirname(__DIR__) . '/vendor/autoload.php';
+
+use MathDeck\Identity\AccountFactory;
+use MathDeck\Identity\PasscodeGenerator;
+use MathDeck\Identity\Port\AccountStore;
+use MathDeck\Identity\Role;
+
+$playerId = $argv[1] ?? null;
+$displayName = $argv[2] ?? null;
+$role = Role::tryFrom($argv[3] ?? 'student');
+$passcode = $argv[4] ?? null;
+
+if (!is_string($playerId) || !is_string($displayName) || $role === null) {
+    fwrite(STDERR, "Usage: bin/create-account <playerId> \"<Display Name>\" [student|teacher] [passcode]\n");
+    exit(1);
+}
+
+$container = require dirname(__DIR__) . '/config/container.php';
+
+$accounts = $container->get(AccountStore::class);
+
+if ($accounts->find($playerId) !== null) {
+    fwrite(STDERR, sprintf("Somebody already signs in as \"%s\".\n", $playerId));
+    exit(1);
+}
+
+$passcode ??= $container->get(PasscodeGenerator::class)->generate();
+
+$accounts->save($container->get(AccountFactory::class)->create($playerId, $displayName, $role, $passcode));
+
+printf("created %s (%s)\npasscode: %s\n", $playerId, $role->value, $passcode);
+printf("\nShown once. It is stored only as a hash, so nothing can recover it later.\n");

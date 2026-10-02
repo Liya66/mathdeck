@@ -2,7 +2,7 @@ IMAGE := mathdeck-test
 RUN   := docker run --rm -v "$(PWD)":/app -w /app $(IMAGE)
 
 .PHONY: image install test coverage stan deptrac mutation check
-.PHONY: db-up db-down test-db test-integration up down logs postman test-js css migrate project seed-demo
+.PHONY: db-up db-down test-db test-integration up down logs postman test-js css migrate project seed-demo account
 .PHONY: local-test local-coverage local-stan
 
 ## Containerised (no local PHP needed) -----------------------------------------
@@ -102,6 +102,10 @@ migrate:
 
 project:
 	docker compose run --rm php php bin/project-analytics
+
+# bin/create-account <playerId> "<Name>" [student|teacher] [passcode]
+account:
+	docker compose run --rm php php bin/create-account $(ARGS)
 
 # Local accounts with known passcodes. Refuses to run without the opt-in flag.
 seed-demo:

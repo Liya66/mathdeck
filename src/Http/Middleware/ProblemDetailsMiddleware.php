@@ -15,7 +15,10 @@ use MathDeck\Engine\Exception\IllegalCommand;
 use MathDeck\Http\Exception\BadRequest;
 use MathDeck\Http\Exception\Forbidden;
 use MathDeck\Http\Exception\Unauthenticated;
+use MathDeck\Identity\Exception\AccountNotFound;
 use MathDeck\Identity\Exception\AuthenticationFailed;
+use MathDeck\Identity\Exception\InvalidAccountDetails;
+use MathDeck\Identity\Exception\PlayerIdAlreadyTaken;
 use MathDeck\Identity\Exception\TooManyAttempts;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
@@ -56,6 +59,12 @@ final readonly class ProblemDetailsMiddleware implements MiddlewareInterface
     {
         [$status, $title, $detail, $extra] = match (true) {
             $failure instanceof BadRequest => [400, 'Bad request', $failure->getMessage(), []],
+            $failure instanceof InvalidAccountDetails => [400, 'Bad request', $failure->getMessage(), []],
+            $failure instanceof AccountNotFound => [404, 'Account not found', $failure->getMessage(), []],
+
+            // A taken sign-in name is a conflict, not a validation error: the
+            // request was well formed and would have worked a moment earlier.
+            $failure instanceof PlayerIdAlreadyTaken => [409, 'Name already taken', $failure->getMessage(), []],
             $failure instanceof Unauthenticated => [401, 'Unauthenticated', $failure->getMessage(), []],
 
             // Signing in failed. The message is deliberately the same whether the

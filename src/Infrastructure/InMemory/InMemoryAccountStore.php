@@ -22,6 +22,15 @@ final class InMemoryAccountStore implements AccountStore
         return $this->accounts[$playerId] ?? null;
     }
 
+    public function all(): array
+    {
+        $all = array_values($this->accounts);
+
+        usort($all, static fn (Account $a, Account $b): int => $a->playerId <=> $b->playerId);
+
+        return $all;
+    }
+
     public function displayNamesFor(array $analyticsKeys): array
     {
         $names = [];

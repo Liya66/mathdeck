@@ -23,6 +23,7 @@ use MathDeck\Authoring\Port\DeckIdFactory;
 use MathDeck\Authoring\Port\DeckStore;
 use MathDeck\Engine\Clock;
 use MathDeck\Identity\AccountFactory;
+use MathDeck\Identity\PasscodeGenerator;
 use MathDeck\Identity\PasswordHasher;
 use MathDeck\Identity\Port\AccountStore;
 use MathDeck\Identity\Port\SignInAttempts;
@@ -67,6 +68,9 @@ final class TestApp
         '#^/v1/decks/[^/]+/fork$#' => '/v1/decks/{deckVersionId}/fork',
         '#^/v1/decks/[^/]+$#' => '/v1/decks/{deckVersionId}',
         '#^/v1/tokens$#' => '/v1/tokens',
+        '#^/v1/accounts/me/passcode$#' => '/v1/accounts/me/passcode',
+        '#^/v1/accounts/[^/]+/passcode$#' => '/v1/accounts/{playerId}/passcode',
+        '#^/v1/accounts$#' => '/v1/accounts',
         '#^/v1/reports/overview#' => '/v1/reports/overview',
         '#^/v1/reports/progression#' => '/v1/reports/progression',
         '#^/v1/reports/errors#' => '/v1/reports/errors',
@@ -117,6 +121,8 @@ final class TestApp
             AccountStore::class => $this->accounts,
             PseudonymResolver::class => new AccountPseudonymResolver($this->accounts),
             TokenIssuer::class => $this->tokens,
+            AccountFactory::class => $this->people,
+            PasscodeGenerator::class => new PasscodeGenerator(),
             SignInAttempts::class => $this->signInAttempts,
             SignInThrottle::class => new SignInThrottle(
                 $this->signInAttempts,

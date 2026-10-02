@@ -350,6 +350,23 @@ role as a signed claim, so a student cannot become a teacher by editing anything
 they hold. There is a test that sends `Bearer alice` — exactly what worked for four
 phases — and asserts a 401.
 
+**Teachers provision their class.** `POST /v1/accounts` adds a child; the passcode
+comes back exactly once, because it is stored only as a hash and nothing can
+recover it later. A teacher who loses one issues a new one, which also clears that
+account's lockout — a child who has just locked themselves out guessing is exactly
+who a reset is for. Anyone can change their own passcode, and that endpoint is
+throttled on the same buckets as signing in, because it checks a credential too.
+
+A teacher may create **students only**. There is no path through the API by which
+an account grants its own level of access to someone else; teacher accounts come
+from `bin/create-account`, on the machine. That is also the bootstrapping story —
+the first teacher cannot come from anywhere else.
+
+Generated passcodes read like `quiet-thistle-000`: two words from a short, concrete
+vocabulary and three digits. About 2.3 million combinations, which is not much on
+its own and is enough only because sign-in is throttled. The two defences work
+together, so neither should be removed without reconsidering the other.
+
 **Sign-in is throttled.** Classroom passcodes are short and memorable by design —
 `play-1234` falls to a few thousand guesses — so a throttle is what makes that
 choice defensible rather than negligent. Two buckets, and a breach of either
@@ -475,6 +492,7 @@ make down              # tear it all down
 make migrate           # apply pending migrations to a running database
 make project           # run the projection worker once
 make seed-demo         # local accounts with known passcodes
+make account ARGS='ada "Ada" student'   # create one account (the only way to make a teacher)
 make mutation          # Infection over the engine, rules and analytics
 make postman           # regenerate the collection from openapi.yaml
 make test-js           # browser-client tests under node --test
@@ -486,7 +504,7 @@ stays fast and dependency-free. When the variable *is* set and the database does
 answer, they fail rather than skip — a silently skipped integration suite is how CI
 goes green without ever touching a database.
 
-Current state: **310 PHP tests (2443 assertions) and 46 JavaScript tests**, 95.7%
+Current state: **349 PHP tests (4717 assertions) and 48 JavaScript tests**, 95.9%
 line coverage, **91% mutation score** on the engine, rules and analytics; clean at
 PHPStan level 8, zero deptrac violations.
 
@@ -528,6 +546,7 @@ Built:
 - [x] Mutation testing, coverage gate, CI, production image, security headers
 - [x] Throttled sign-in, idempotent match creation
 - [x] Dark mode across all three surfaces
+- [x] Account management: teachers provision students, passcode reset, self-service change
 
 Not here yet:
 
@@ -535,7 +554,6 @@ Not here yet:
 - Token revocation. Tokens are self-contained, so signing out is a client-side
   discard; a stolen token stays valid until it expires. Short lifetimes, not
   revocation, are the current answer.
-- Account management: `bin/seed-demo` is the only way to create an account.
 - Live updates are polled every 1.5s, not pushed; websockets or SSE would be the
   fix, and are not worth it until someone complains
 

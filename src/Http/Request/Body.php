@@ -47,6 +47,22 @@ final readonly class Body
         return $value;
     }
 
+    /** Absent or empty means "not supplied", which is different from invalid. */
+    public function optionalString(string $key): ?string
+    {
+        $value = $this->data[$key] ?? null;
+
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (!is_string($value)) {
+            throw BadRequest::because(sprintf('"%s" must be a string.', $key));
+        }
+
+        return $value;
+    }
+
     /** @return list<string> */
     public function stringList(string $key, int $minimum = 0): array
     {
