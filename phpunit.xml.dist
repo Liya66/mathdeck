@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         cacheDirectory=".phpunit.cache"
+         executionOrder="random"
+         failOnRisky="true"
+         failOnWarning="true"
+         beStrictAboutOutputDuringTests="true"
+         colors="true">
+    <testsuites>
+        <testsuite name="unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <!-- Skips itself unless MATCHDECK_DSN points at a reachable MySQL, so the
+             default run stays fast and dependency-free. -->
+        <testsuite name="integration">
+            <directory>tests/Integration</directory>
+        </testsuite>
+        <!-- Runs the real app in-process and validates every request and response
+             against openapi.yaml. No socket, no server. -->
+        <testsuite name="functional">
+            <directory>tests/Functional</directory>
+        </testsuite>
+    </testsuites>
+
+    <!-- Coverage is measured on the pure engine only. Infrastructure boilerplate in
+         the denominator inflates the number without adding confidence. -->
+    <source>
+        <include>
+            <directory suffix=".php">src/Engine</directory>
+            <directory suffix=".php">src/Analytics</directory>
+            <directory suffix=".php">src/Application</directory>
+            <directory suffix=".php">src/Authoring</directory>
+            <directory suffix=".php">src/Http</directory>
+            <directory suffix=".php">src/Identity</directory>
+        </include>
+    </source>
+
+    <coverage>
+        <report>
+            <text outputFile="php://stdout" showOnlySummary="true"/>
+        </report>
+    </coverage>
+</phpunit>

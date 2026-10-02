@@ -1,0 +1,68 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Demo accounts for a local environment.
+ *
+ * Deliberately a script and not a migration: a migration would put known passcodes
+ * into every database that ever runs it, production included. This has to be asked
+ * for, and it refuses to run unless MATCHDECK_ALLOW_DEMO_SEED is set.
+ */
+
+require dirname(__DIR__) . '/vendor/autoload.php';
+
+use MathDeck\Identity\AccountFactory;
+use MathDeck\Identity\Port\AccountStore;
+use MathDeck\Identity\Role;
+
+if (getenv('MATCHDECK_ALLOW_DEMO_SEED') !== '1') {
+    fwrite(STDERR, "Refusing to seed demo accounts. Set MATCHDECK_ALLOW_DEMO_SEED=1 if you mean it.\n");
+    exit(1);
+}
+
+$container = require dirname(__DIR__) . '/config/container.php';
+
+$accounts = $container->get(AccountStore::class);
+$factory = $container->get(AccountFactory::class);
+
+$people = [
+    ['miss-lee', 'Miss Lee', Role::Teacher, 'teach-me-1234'],
+    ['ada', 'Ada', Role::Student, 'play-1234'],
+    ['ben', 'Ben', Role::Student, 'play-1234'],
+    ['cleo', 'Cleo', Role::Student, 'play-1234'],
+    ['dev', 'Dev', Role::Student, 'play-1234'],
+];
+
+foreach ($people as [$playerId, $displayName, $role, $passcode]) {
+    $existing = $accounts->find($playerId);
+
+    // Always write, never skip. "Already exists" used to leave an account behind
+    // with whatever passcode it happened to have — an integration test's, say —
+    // which is a demo seeder that does not actually guarantee you can sign in.
+    $account = $factory->create($playerId, $displayName, $role, $passcode);
+
+    if ($existing !== null) {
+        // Keep the pseudonym: rotating it would orphan every fact already collected
+        // for this person.
+        $account = new MathDeck\Identity\Account(
+            playerId: $account->playerId,
+            displayName: $account->displayName,
+            role: $account->role,
+            passwordHash: $account->passwordHash,
+            analyticsKey: $existing->analyticsKey,
+            createdAt: $existing->createdAt,
+        );
+    }
+
+    $accounts->save($account);
+
+    printf(
+        "%-10s %-8s (%s, passcode: %s)\n",
+        $playerId,
+        $existing === null ? 'created' : 'reset',
+        $role->value,
+        $passcode,
+    );
+}

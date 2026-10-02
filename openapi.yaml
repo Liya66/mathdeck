@@ -1,0 +1,813 @@
+openapi: 3.0.3
+info:
+  title: MathDeck API
+  version: 0.4.0
+  description: |
+    Server-authoritative API for a turn-based educational mathematics card game.
+
+    Two things are worth reading before the endpoint list:
+
+    **A wrong answer is a 200.** Playing an equation that misses the target is a
+    successful request that produces an `equation_rejected` event. Only requests a
+    correct client could not have sent (playing out of turn, playing cards you do
+    not hold, playing in a finished match) return 4xx.
+
+    **Responses are per-player.** Opponents' hands, the draw pile's contents and the
+    match seed are never sent to anyone. `cards_drawn` events are redacted to a
+    count for everyone except the player who drew.
+
+servers:
+  - url: http://localhost:8080
+    description: Local Docker Compose
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/tokens:
+    post:
+      summary: Sign in
+      operationId: issueToken
+      security: []
+      description: |
+        The only route that does not require a token. Returns a signed, expiring
+        bearer token carrying the account's role.
+
+        A wrong passcode and an account that does not exist return the same 401 with
+        the same wording — otherwise this endpoint is a way to discover who has an
+        account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId, passcode]
+              properties:
+                playerId: { type: string }
+                passcode: { type: string }
+      responses:
+        '200':
+          description: A signed token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, playerId, role, expiresAt]
+                properties:
+                  token: { type: string }
+                  playerId: { type: string }
+                  role: { type: string, enum: [student, teacher] }
+                  expiresAt: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /v1/matches:
+    post:
+      summary: Create a match
+      operationId: createMatch
+      description: |
+        The seed is minted by the server and never accepted from a client: a client
+        that chooses the seed knows the deck order before a card is dealt.
+
+        Not idempotent. A retried request creates a second match.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMatchRequest'
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MatchView' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/matches/{matchId}:
+    get:
+      summary: Read the match as the calling player sees it
+      operationId: getMatch
+      parameters:
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200':
+          description: The caller's view of the match
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MatchView' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/matches/{matchId}/commands:
+    post:
+      summary: Send a command
+      operationId: sendCommand
+      description: |
+        Commands carry intent, never state. There is no field here for a score, a
+        result, or the identity of the player — the player is the bearer token.
+
+        `Idempotency-Key` is required. A retry with the same key returns the original
+        events and sets `Idempotency-Replayed: true`.
+      parameters:
+        - $ref: '#/components/parameters/MatchId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, maxLength: 64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandRequest'
+      responses:
+        '200':
+          description: The command was processed. This includes rejected equations.
+          headers:
+            Idempotency-Replayed:
+              schema: { type: string, enum: ['true'] }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: |
+            Refused outright: wrong turn, cards not held, or a finished match. The
+            `reason` field carries the machine-readable code.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/matches/{matchId}/events:
+    get:
+      summary: Read the match log from a cursor
+      operationId: getEvents
+      parameters:
+        - $ref: '#/components/parameters/MatchId'
+        - name: since
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: Return events with a sequence number greater than this.
+      responses:
+        '200':
+          description: Events after the cursor, redacted for the caller
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventsResponse' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/deck-schema:
+    get:
+      summary: The deck JSON Schema
+      operationId: getDeckSchema
+      description: |
+        The exact file the server validates decks against. The editor reads field
+        limits from here so it cannot describe rules the server does not enforce.
+      responses:
+        '200':
+          description: A JSON Schema document
+          content:
+            application/schema+json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /v1/decks:
+    get:
+      summary: List decks
+      operationId: listDecks
+      description: Published decks are visible to everyone; drafts only to their author.
+      responses:
+        '200':
+          description: Visible decks
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeckListResponse' }
+        '401': { $ref: '#/components/responses/Problem' }
+    post:
+      summary: Create a draft
+      operationId: createDeck
+      description: |
+        Drafts are saved unvalidated — a teacher halfway through authoring must be
+        able to stop. Correctness is enforced at publish.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                definition: { $ref: '#/components/schemas/DeckDefinition' }
+      responses:
+        '201':
+          description: Draft created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeckVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /v1/decks/lint:
+    post:
+      summary: Check a deck without saving it
+      operationId: lintDeck
+      description: |
+        Always 200. A deck full of problems is a successful analysis of a broken
+        deck, and the editor calls this while the teacher is still typing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition]
+              properties:
+                definition: { $ref: '#/components/schemas/DeckDefinition' }
+      responses:
+        '200':
+          description: The lint report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LintReport' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /v1/decks/{deckVersionId}:
+    get:
+      summary: Read a deck version
+      operationId: getDeck
+      parameters:
+        - $ref: '#/components/parameters/DeckVersionId'
+      responses:
+        '200':
+          description: The deck version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeckVersion' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      summary: Update a draft
+      operationId: updateDeck
+      description: Drafts only. A published version answers 409 — fork it instead.
+      parameters:
+        - $ref: '#/components/parameters/DeckVersionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition]
+              properties:
+                definition: { $ref: '#/components/schemas/DeckDefinition' }
+      responses:
+        '200':
+          description: The updated draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeckVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/decks/{deckVersionId}/publish:
+    post:
+      summary: Publish a draft
+      operationId: publishDeck
+      description: |
+        Runs the full check. On refusal the 422 body carries the whole lint report
+        under `report`, so the editor can point at the offending targets.
+      parameters:
+        - $ref: '#/components/parameters/DeckVersionId'
+      responses:
+        '200':
+          description: Published, and now immutable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeckVersion' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422':
+          description: The deck would not be playable
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /v1/decks/{deckVersionId}/fork:
+    post:
+      summary: Fork a deck into a new draft
+      operationId: forkDeck
+      description: How a published deck is changed. The fork belongs to whoever made it.
+      parameters:
+        - $ref: '#/components/parameters/DeckVersionId'
+      responses:
+        '201':
+          description: A new draft at the next version number
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeckVersion' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/reports/overview:
+    get:
+      summary: Headline numbers for a class
+      operationId: reportOverview
+      description: |
+        Reports read only from the projections, never from the event log. Teachers
+        only — this is the one part of the API that shows one person's performance
+        to another.
+      parameters:
+        - $ref: '#/components/parameters/DeckFilter'
+        - $ref: '#/components/parameters/StudentsFilter'
+        - $ref: '#/components/parameters/FromFilter'
+        - $ref: '#/components/parameters/ToFilter'
+      responses:
+        '200':
+          description: Totals for the selection
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [filter, data]
+                properties:
+                  filter: { $ref: '#/components/schemas/ReportFilter' }
+                  data: { $ref: '#/components/schemas/Overview' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/reports/progression:
+    get:
+      summary: Per-student progress
+      operationId: reportProgression
+      parameters:
+        - $ref: '#/components/parameters/DeckFilter'
+        - $ref: '#/components/parameters/StudentsFilter'
+        - $ref: '#/components/parameters/FromFilter'
+        - $ref: '#/components/parameters/ToFilter'
+      responses:
+        '200':
+          description: One row per student, ordered by student id
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [filter, data]
+                properties:
+                  filter: { $ref: '#/components/schemas/ReportFilter' }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/StudentProgress' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/reports/errors:
+    get:
+      summary: Error distribution by misconception
+      operationId: reportErrors
+      description: |
+        Only diagnosable misconceptions appear here. Protocol faults — playing out
+        of turn, playing a card you do not hold — never became events, so a broken
+        or dishonest client cannot show up as a learning difficulty.
+      parameters:
+        - $ref: '#/components/parameters/DeckFilter'
+        - $ref: '#/components/parameters/StudentsFilter'
+        - $ref: '#/components/parameters/FromFilter'
+        - $ref: '#/components/parameters/ToFilter'
+      responses:
+        '200':
+          description: Reason codes by frequency, most common first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [filter, data]
+                properties:
+                  filter: { $ref: '#/components/schemas/ReportFilter' }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ErrorCluster' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/reports/latency:
+    get:
+      summary: Problem-solving latency by outcome
+      operationId: reportLatency
+      description: |
+        Measured server-side from the moment a turn opened. Slow-and-right and
+        fast-and-wrong are different problems and want different teaching, which is
+        why this is split by outcome rather than averaged.
+      parameters:
+        - $ref: '#/components/parameters/DeckFilter'
+        - $ref: '#/components/parameters/StudentsFilter'
+        - $ref: '#/components/parameters/FromFilter'
+        - $ref: '#/components/parameters/ToFilter'
+      responses:
+        '200':
+          description: One row per outcome, most frequent first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [filter, data]
+                properties:
+                  filter: { $ref: '#/components/schemas/ReportFilter' }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/LatencyBucket' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        A signed, expiring token from POST /v1/tokens. Self-contained and HMAC-signed,
+        so verifying costs no database round trip — and cannot be revoked before it
+        expires, which is why the lifetime is short rather than convenient.
+
+  parameters:
+    MatchId:
+      name: matchId
+      in: path
+      required: true
+      schema: { type: string }
+    DeckFilter:
+      name: deckVersionId
+      in: query
+      required: false
+      schema: { type: string }
+    StudentsFilter:
+      name: students
+      in: query
+      required: false
+      description: Comma-separated student pseudonyms (never names).
+      schema: { type: string }
+    FromFilter:
+      name: from
+      in: query
+      required: false
+      schema: { type: string }
+    ToFilter:
+      name: to
+      in: query
+      required: false
+      schema: { type: string }
+    DeckVersionId:
+      name: deckVersionId
+      in: path
+      required: true
+      description: "`{deckId}@{version}`, for example `starter@1`."
+      schema: { type: string }
+
+  responses:
+    Problem:
+      description: An RFC 7807 problem document
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        reason:
+          type: string
+          description: Machine-readable refusal code, present on 409.
+        retryAfter: { type: integer }
+        report:
+          description: The full lint report, present on a 422 from publish.
+          type: object
+          additionalProperties: true
+
+    CreateMatchRequest:
+      type: object
+      required: [deckVersionId, playerIds]
+      properties:
+        deckVersionId: { type: string }
+        playerIds:
+          type: array
+          minItems: 2
+          items: { type: string }
+
+    CommandRequest:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [play_cards, forfeit]
+        cardIds:
+          type: array
+          minItems: 1
+          items: { type: string }
+          description: Required for play_cards. Ordered left to right as laid out.
+
+    Card:
+      type: object
+      required: [id, kind, value, operator]
+      properties:
+        id: { type: string }
+        kind:
+          type: string
+          enum: [operand, operator]
+        value:
+          type: integer
+          nullable: true
+        operator:
+          type: string
+          enum: ['+', '-', '*', '/']
+          nullable: true
+
+    MatchView:
+      type: object
+      required:
+        [matchId, deckVersionId, seq, phase, target, targetsRemaining,
+         drawPileCount, yourTurn, winnerId, you, opponents, rules]
+      properties:
+        matchId: { type: string }
+        deckVersionId: { type: string }
+        seq: { type: integer }
+        phase:
+          type: string
+          enum: [awaiting_play, ended]
+        target: { type: integer }
+        targetsRemaining: { type: integer }
+        drawPileCount:
+          type: integer
+          description: A count. The pile's contents are never sent.
+        yourTurn: { type: boolean }
+        winnerId:
+          type: string
+          nullable: true
+        you:
+          type: object
+          required: [id, score, hand]
+          properties:
+            id: { type: string }
+            score: { type: integer }
+            hand:
+              type: array
+              items: { $ref: '#/components/schemas/Card' }
+        opponents:
+          type: array
+          items:
+            type: object
+            required: [id, score, handCount]
+            properties:
+              id: { type: string }
+              score: { type: integer }
+              handCount:
+                type: integer
+                description: A count. Opponent hands are never sent.
+        rules:
+          type: object
+          required: [handSize, minimumCards, maximumCards, requireIntegerResult]
+          properties:
+            handSize: { type: integer }
+            minimumCards: { type: integer }
+            maximumCards: { type: integer }
+            requireIntegerResult: { type: boolean }
+
+    EventEnvelope:
+      type: object
+      required: [seq, type, occurredAt, payload]
+      properties:
+        seq: { type: integer }
+        type:
+          type: string
+          enum:
+            [cards_played, equation_solved, equation_rejected, cards_drawn,
+             target_revealed, turn_ended, match_ended]
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+          description: |
+            Shape depends on `type`. `cards_drawn` carries `cards` for the player who
+            drew and `cardCount` for everyone else.
+
+    CommandResponse:
+      type: object
+      required: [replayed, events, state]
+      properties:
+        replayed:
+          type: boolean
+          description: True when this was a retry of an already-accepted command.
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/EventEnvelope' }
+        state: { $ref: '#/components/schemas/MatchView' }
+
+    EventsResponse:
+      type: object
+      required: [since, events]
+      properties:
+        since: { type: integer }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/EventEnvelope' }
+
+    DeckDefinition:
+      type: object
+      additionalProperties: true
+      description: |
+        A deck document. Its shape is defined by the JSON Schema served at
+        GET /v1/deck-schema and is deliberately not duplicated here — one schema,
+        one source of truth, and no second copy to drift.
+
+    DeckVersion:
+      type: object
+      required: [deckVersionId, deckId, version, name, authorId, status, updatedAt, publishedAt, definition]
+      properties:
+        deckVersionId: { type: string }
+        deckId: { type: string }
+        version: { type: integer }
+        name: { type: string }
+        authorId: { type: string }
+        status:
+          type: string
+          enum: [draft, published, archived]
+        updatedAt: { type: string, format: date-time }
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        definition: { $ref: '#/components/schemas/DeckDefinition' }
+
+    DeckListResponse:
+      type: object
+      required: [decks]
+      properties:
+        decks:
+          type: array
+          items:
+            type: object
+            required: [deckVersionId, deckId, version, name, authorId, status, updatedAt]
+            properties:
+              deckVersionId: { type: string }
+              deckId: { type: string }
+              version: { type: integer }
+              name: { type: string }
+              authorId: { type: string }
+              status: { type: string, enum: [draft, published, archived] }
+              updatedAt: { type: string, format: date-time }
+
+    LintProblem:
+      type: object
+      required: [code, path, detail]
+      properties:
+        code: { type: string }
+        path: { type: string }
+        detail: { type: string }
+
+    TargetReport:
+      type: object
+      required: [target, reachable, shortestCards, simpleSolutions, example]
+      properties:
+        target: { type: integer }
+        reachable:
+          type: boolean
+          nullable: true
+          description: |
+            null means the search exhausted its budget. A deck is never refused on
+            an unfinished search — unknown is a warning, not an error.
+        shortestCards:
+          type: integer
+          nullable: true
+        simpleSolutions:
+          type: integer
+          description: How many two-number ways there are to make this target.
+        example:
+          type: string
+          nullable: true
+          description: An expression that makes the target, verified against the engine.
+
+    LintReport:
+      type: object
+      required: [publishable, errors, warnings, targets]
+      properties:
+        publishable: { type: boolean }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/LintProblem' }
+        warnings:
+          type: array
+          items: { $ref: '#/components/schemas/LintProblem' }
+        targets:
+          type: array
+          items: { $ref: '#/components/schemas/TargetReport' }
+
+    ReportFilter:
+      type: object
+      required: [deckVersionId, studentKeys, from, to]
+      properties:
+        deckVersionId: { type: string, nullable: true }
+        studentKeys:
+          description: Pseudonyms, never names.
+          type: array
+          items: { type: string }
+        from: { type: string, nullable: true }
+        to: { type: string, nullable: true }
+
+    Overview:
+      type: object
+      required: [attempts, solved, accuracy, students, matches, totalScore, medianLatencyMs]
+      properties:
+        attempts:
+          type: integer
+          description: Every try, right or wrong. Effort, not just success.
+        solved: { type: integer }
+        accuracy: { type: number }
+        students: { type: integer }
+        matches: { type: integer }
+        totalScore: { type: integer }
+        medianLatencyMs:
+          type: integer
+          nullable: true
+
+    StudentProgress:
+      type: object
+      required: [studentKey, displayName, attempts, solved, accuracy, totalScore, medianLatencyMs, firstSeen, lastSeen]
+      properties:
+        studentKey:
+          type: string
+          description: |
+            The pseudonym the fact table stores. Progression is the only report that
+            resolves it back to a person, and only for a teacher.
+        displayName: { type: string }
+        attempts: { type: integer }
+        solved: { type: integer }
+        accuracy: { type: number }
+        totalScore: { type: integer }
+        medianLatencyMs:
+          type: integer
+          nullable: true
+        firstSeen: { type: string, format: date-time }
+        lastSeen: { type: string, format: date-time }
+
+    ErrorCluster:
+      type: object
+      required: [reason, count, share, students]
+      properties:
+        reason:
+          type: string
+          description: A misconception code from the engine's taxonomy.
+        count: { type: integer }
+        share:
+          type: number
+          description: Share of mistakes, not of all attempts.
+        students:
+          type: integer
+          description: How many different learners made this mistake.
+
+    LatencyBucket:
+      type: object
+      required: [bucket, count, medianLatencyMs, p90LatencyMs]
+      properties:
+        bucket:
+          type: string
+          description: "`solved`, or the reason code the attempt was rejected for."
+        count: { type: integer }
+        medianLatencyMs: { type: integer }
+        p90LatencyMs: { type: integer }

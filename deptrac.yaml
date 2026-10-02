@@ -1,0 +1,69 @@
+# The architecture rule, enforced.
+#
+# Engine depends on nothing but itself. The day that stops being true, every claim
+# in the README about determinism and testability quietly stops being true too.
+deptrac:
+  paths:
+    - ./src
+  layers:
+    - name: Engine
+      collectors:
+        - type: directory
+          value: src/Engine/.*
+    - name: Application
+      collectors:
+        - type: directory
+          value: src/Application/.*
+    - name: Infrastructure
+      collectors:
+        - type: directory
+          value: src/Infrastructure/.*
+    - name: Analytics
+      collectors:
+        - type: directory
+          value: src/Analytics/.*
+    - name: Identity
+      collectors:
+        - type: directory
+          value: src/Identity/.*
+    - name: Authoring
+      collectors:
+        - type: directory
+          value: src/Authoring/.*
+    - name: Http
+      collectors:
+        - type: directory
+          value: src/Http/.*
+  ruleset:
+    Engine: ~
+    Application:
+      - Engine
+    # Authoring is a second domain beside Application, not above it. It knows the
+    # engine's rules because a deck compiles into them, and nothing else.
+    Authoring:
+      - Engine
+    # Analytics is the read side of the same log the application writes, so it may
+    # see Application's events and ports. It must never write through them.
+    Analytics:
+      - Application
+      - Engine
+    # Identity knows only the clock. Nothing about matches, decks or reports —
+    # which is why pseudonymous analytics could be added without it learning what
+    # an attempt is.
+    Identity:
+      - Engine
+    Infrastructure:
+      - Application
+      - Analytics
+      - Authoring
+      - Identity
+      - Engine
+    # Http talks to ports, never to adapters. The concrete wiring lives in
+    # config/container.php, which is outside src/ precisely because a composition
+    # root is the one place allowed to know both sides.
+    Http:
+      - Application
+      - Analytics
+      - Authoring
+      - Identity
+      - Engine

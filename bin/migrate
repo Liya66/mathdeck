@@ -1,0 +1,73 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * Applies migrations/*.sql in order, once each.
+ *
+ * Mounting the migrations into MySQL's init directory only works on a brand-new
+ * volume, so adding a migration meant destroying the database to get it — twice
+ * over, that stops being a quirk and becomes a footgun. This runs against an
+ * existing database and records what it has done.
+ *
+ * Statement splitting is a plain split on end-of-line semicolons. That is fine for
+ * DDL and the small seeds here; the day a migration needs a stored routine, this
+ * needs a real parser.
+ */
+
+require dirname(__DIR__) . '/vendor/autoload.php';
+
+use MathDeck\Infrastructure\Mysql\Connection;
+
+$connection = Connection::fromEnvironment();
+
+if ($connection === null) {
+    fwrite(STDERR, "MATCHDECK_DSN is not set.\n");
+    exit(1);
+}
+
+$connection->exec(
+    'CREATE TABLE IF NOT EXISTS schema_migrations (
+        filename   VARCHAR(160) NOT NULL,
+        applied_at DATETIME(6)  NOT NULL,
+        PRIMARY KEY (filename)
+    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4',
+);
+
+$applied = $connection->query('SELECT filename FROM schema_migrations')?->fetchAll(PDO::FETCH_COLUMN) ?: [];
+$files = glob(dirname(__DIR__) . '/migrations/*.sql') ?: [];
+sort($files);
+
+$ran = 0;
+
+foreach ($files as $file) {
+    $name = basename($file);
+
+    if (in_array($name, $applied, true)) {
+        continue;
+    }
+
+    $sql = (string) file_get_contents($file);
+
+    foreach (preg_split('/;\s*(?:\r?\n|$)/', $sql) ?: [] as $statement) {
+        if (trim($statement) === '') {
+            continue;
+        }
+
+        $connection->exec($statement);
+    }
+
+    $record = $connection->prepare(
+        'INSERT INTO schema_migrations (filename, applied_at) VALUES (:filename, :now)',
+    );
+    $record->execute([
+        'filename' => $name,
+        'now' => (new DateTimeImmutable('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s.u'),
+    ]);
+
+    printf("applied %s\n", $name);
+    ++$ran;
+}
+
+printf("%d migration%s applied, %d already present.\n", $ran, $ran === 1 ? '' : 's', count($files) - $ran);

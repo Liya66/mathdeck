@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  static:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - uses: ramsey/composer-install@v3
+      - run: vendor/bin/phpstan analyse --no-progress
+      # The architecture rule. Engine may depend on nothing outside itself; the day
+      # that stops being true, the README's claims quietly stop being true too.
+      - run: vendor/bin/deptrac analyse --no-progress --fail-on-uncovered=false
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: mathdeck
+          MYSQL_USER: mathdeck
+          MYSQL_PASSWORD: mathdeck
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -umathdeck -pmathdeck"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      MATCHDECK_DSN: "mysql:host=127.0.0.1;port=3306;dbname=mathdeck;charset=utf8mb4"
+      MATCHDECK_DB_USER: mathdeck
+      MATCHDECK_DB_PASSWORD: mathdeck
+      MATCHDECK_TOKEN_SECRET: "ci-secret-0123456789abcdef0123456789abcdef"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_mysql
+          coverage: pcov
+      - uses: ramsey/composer-install@v3
+      - run: php bin/migrate
+      # The integration suite skips itself when MATCHDECK_DSN is unset. It is set
+      # here on purpose: a silently skipped integration suite is how CI goes green
+      # without ever touching a database.
+      - run: vendor/bin/phpunit --coverage-text --coverage-clover=coverage.xml
+      - name: Coverage gate
+        run: |
+          php -r '
+            $xml = simplexml_load_file("coverage.xml");
+            $m = $xml->project->metrics;
+            $covered = (int) $m["coveredstatements"];
+            $total = (int) $m["statements"];
+            $percent = $total === 0 ? 0 : round($covered / $total * 100, 2);
+            printf("line coverage: %.2f%%\n", $percent);
+            exit($percent >= 85.0 ? 0 : 1);
+          '
+
+  javascript:
+    name: Browser client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test tests/js/
+
+  mutation:
+    name: Mutation testing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: pcov
+      - uses: ramsey/composer-install@v3
+      # Scoped to the arithmetic and the rules: on a rules engine, line coverage can
+      # sit at 100% while a flipped comparison goes unnoticed, and these are the
+      # files where that would matter most.
+      - run: vendor/bin/infection --threads=max --no-progress --show-mutations

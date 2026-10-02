@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MathDeck — class dashboard</title>
+    <link rel="stylesheet" href="../app/app.css">
+    <style>
+        /* Chart roles, from the validated reference palette. Declared as tokens so
+           light and dark swap in one place and the charts are written against roles
+           rather than raw hex. */
+        .viz-root {
+            color-scheme: light;
+            --surface-1:      #fcfcfb;
+            --page:           #f9f9f7;
+            --text-primary:   #0b0b0b;
+            --text-secondary: #52514e;
+            --text-muted:     #898781;
+            --grid:           #e1e0d9;
+            --axis:           #c3c2b7;
+            --series-strong:  #2a78d6;  /* blue 450 */
+            --series-soft:    #86b6ef;  /* blue 250 — ordinal light-end floor */
+            --track:          #cde2fb;  /* blue 100 */
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root:where(:not([data-theme="light"])) .viz-root {
+                color-scheme: dark;
+                --surface-1:      #1a1a19;
+                --page:           #0d0d0d;
+                --text-primary:   #ffffff;
+                --text-secondary: #c3c2b7;
+                --text-muted:     #898781;
+                --grid:           #2c2c2a;
+                --axis:           #383835;
+                --series-strong:  #3987e5;  /* blue 400 */
+                --series-soft:    #1c5cab;  /* blue 550 — ordinal dark-end floor */
+                --track:          #184f95;
+            }
+        }
+
+        :root[data-theme="dark"] .viz-root {
+            color-scheme: dark;
+            --surface-1:      #1a1a19;
+            --page:           #0d0d0d;
+            --text-primary:   #ffffff;
+            --text-secondary: #c3c2b7;
+            --text-muted:     #898781;
+            --grid:           #2c2c2a;
+            --axis:           #383835;
+            --series-strong:  #3987e5;
+            --series-soft:    #1c5cab;
+            --track:          #184f95;
+        }
+
+        body { background: var(--page); color: var(--text-primary); }
+        .panel { background: var(--surface-1); }
+
+        /* Every chart class is viz-prefixed. `.grid` alone collided with Tailwind's
+           own `grid` display utility on the section wrapper — and because `stroke`
+           inherits in SVG, that painted a hairline stroke onto every shape inside,
+           including the transparent hover targets. */
+        /* Marks carry colour; text wears ink tokens, never a series hue. */
+        .viz-bar         { fill: var(--series-strong); }
+        .viz-dot-median  { fill: var(--series-strong); stroke: var(--surface-1); stroke-width: 2; }
+        .viz-dot-p90     { fill: var(--series-soft);   stroke: var(--surface-1); stroke-width: 2; }
+        .viz-connector   { stroke: var(--series-soft); stroke-width: 2; stroke-linecap: round; }
+        .viz-axis        { stroke: var(--axis); stroke-width: 1; }
+        .viz-grid        { stroke: var(--grid); stroke-width: 1; }
+        .viz-cat-label   { fill: var(--text-secondary); font-size: 12px; }
+        .viz-value-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
+        .viz-axis-label  { fill: var(--text-muted); font-size: 11px; }
+        .viz-mark        { cursor: default; }
+        .viz-mark:hover .viz-bar,
+        .viz-mark:hover .viz-dot-median { filter: brightness(1.08); }
+
+        #tooltip {
+            position: fixed; pointer-events: none; opacity: 0; transition: opacity .12s;
+            background: var(--text-primary); color: var(--surface-1);
+            font-size: 12px; padding: 6px 9px; border-radius: 6px; max-width: 22rem; z-index: 50;
+        }
+        #tooltip.visible { opacity: 1; }
+    </style>
+</head>
+<body class="viz-root h-full antialiased">
+    <main id="dashboard" class="mx-auto max-w-5xl p-4 sm:p-6"></main>
+    <div id="tooltip" role="status"></div>
+    <script type="module" src="./js/main.js"></script>
+</body>
+</html>

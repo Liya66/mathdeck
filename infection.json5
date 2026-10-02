@@ -1,0 +1,33 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    // Scoped to the arithmetic and the rules on purpose.
+    //
+    // On a rules engine, line coverage can read 100% while a flipped `>=` goes
+    // unnoticed — and these are the files where a flipped comparison quietly marks
+    // a child's correct answer wrong. Running mutation testing over the whole
+    // codebase would take minutes and mostly mutate serialisers.
+    "source": {
+        "directories": [
+            "src/Engine/Math",
+            "src/Engine/Rule",
+            "src/Analytics"
+        ]
+    },
+    "logs": {
+        "text": "php://stdout",
+        "stryker": { "badge": "main" }
+    },
+    "mutators": {
+        "@default": true
+    },
+    "testFramework": "phpunit",
+    "testFrameworkOptions": "--testsuite=unit",
+    // Set just under what the suite currently achieves (90 / 93), so a regression
+    // fails but ordinary work does not. 100% is not the target and never will be:
+    // Infection cannot tell an equivalent mutant from a real one, and several of
+    // the survivors here are defensive branches that cannot be reached at all —
+    // the clamp in Percentile::at, and the gcd(0, 0) case that a zero denominator
+    // already made impossible.
+    "minMsi": 88,
+    "minCoveredMsi": 91
+}

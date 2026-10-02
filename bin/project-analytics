@@ -1,0 +1,60 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * The projection worker.
+ *
+ * Runs outside the request path on purpose: a command that waited for analytics
+ * would get slower every time a report got more expensive. Pass --loop to keep
+ * going, which is what the compose worker does.
+ */
+
+require dirname(__DIR__) . '/vendor/autoload.php';
+
+use MathDeck\Analytics\AttemptProjector;
+use MathDeck\Analytics\Port\AttemptStore;
+use MathDeck\Analytics\Port\ProjectionCursors;
+use MathDeck\Analytics\Port\PseudonymResolver;
+use MathDeck\Analytics\ProjectionRunner;
+use MathDeck\Application\Port\EventStore;
+use MathDeck\Application\Port\MatchStore;
+
+$container = require dirname(__DIR__) . '/config/container.php';
+
+$runner = new ProjectionRunner(
+    $container->get(MatchStore::class),
+    $container->get(EventStore::class),
+    $container->get(AttemptStore::class),
+    $container->get(ProjectionCursors::class),
+    new AttemptProjector($container->get(PseudonymResolver::class)),
+);
+
+$loop = in_array('--loop', $argv, true);
+$interval = 2;
+
+do {
+    try {
+        $result = $runner->run();
+
+        if ($result['attempts'] > 0 || $result['skipped'] > 0) {
+            printf(
+                "[%s] projected %d attempts across %d matches%s\n",
+                (new DateTimeImmutable())->format('H:i:s'),
+                $result['attempts'],
+                $result['matches'],
+                // Attempts by players with no account: nothing to pseudonymise them
+                // against, so they are dropped rather than stored under a name.
+                $result['skipped'] > 0 ? sprintf(' (%d skipped, no account)', $result['skipped']) : '',
+            );
+        }
+    } catch (Throwable $failure) {
+        // A worker that dies on one bad match stops projecting everything else.
+        fwrite(STDERR, sprintf("[error] %s\n", $failure->getMessage()));
+    }
+
+    if ($loop) {
+        sleep($interval);
+    }
+} while ($loop);

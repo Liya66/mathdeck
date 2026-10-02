@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mathdeck.dev/schema/deck-v1.schema.json",
+  "title": "MathDeck deck definition",
+  "description": "What a teacher authors. Everything the engine needs to run a match, and nothing it does not — there is no code in a deck, which is the point: new decks must never require a deployment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "operands", "operators", "targets", "play"],
+  "properties": {
+    "schemaVersion": {
+      "description": "Bumped only for a breaking change. Old versions keep validating against their own file.",
+      "const": 1
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "description": { "type": "string", "maxLength": 500 },
+    "operands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["values", "copies"],
+      "properties": {
+        "values": {
+          "description": "The numbers a learner can be dealt.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 40,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 0, "maximum": 999 }
+        },
+        "copies": { "type": "integer", "minimum": 1, "maximum": 20 }
+      }
+    },
+    "operators": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbols", "copies"],
+      "properties": {
+        "symbols": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "enum": ["+", "-", "*", "/"] }
+        },
+        "copies": { "type": "integer", "minimum": 1, "maximum": 40 }
+      }
+    },
+    "targets": {
+      "description": "Numbers a learner is asked to reach. Every one is checked for reachability before the deck can be published.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": { "type": "integer", "minimum": -999, "maximum": 9999 }
+    },
+    "play": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["handSize", "minimumCards", "maximumCards", "targetsPerMatch", "requireIntegerResult", "baseScore"],
+      "properties": {
+        "handSize": { "type": "integer", "minimum": 3, "maximum": 12 },
+        "minimumCards": {
+          "description": "An alternating expression always has an odd number of cards.",
+          "enum": [3, 5, 7, 9]
+        },
+        "maximumCards": { "enum": [3, 5, 7, 9] },
+        "targetsPerMatch": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "requireIntegerResult": { "type": "boolean" },
+        "baseScore": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    }
+  }
+}

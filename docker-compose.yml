@@ -1,0 +1,84 @@
+# Multi-service environment for the integration suite.
+#
+# migrations/ is mounted into MySQL's init directory, so a fresh volume applies the
+# schema on first boot — no migration runner needed while there is exactly one file.
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: mathdeck
+      MYSQL_USER: mathdeck
+      MYSQL_PASSWORD: mathdeck
+    # Schema is applied by bin/migrate, not by the init directory: init scripts
+    # only ever run on a brand-new volume, so adding a migration used to mean
+    # destroying the database to get it.
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-umathdeck", "-pmathdeck"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  php:
+    build:
+      context: .
+      dockerfile: docker/test.Dockerfile
+    environment:
+      MATCHDECK_DSN: "mysql:host=mysql;dbname=mathdeck;charset=utf8mb4"
+      MATCHDECK_DB_USER: mathdeck
+      MATCHDECK_DB_PASSWORD: mathdeck
+    volumes:
+      - .:/app
+    working_dir: /app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["vendor/bin/phpunit"]
+
+  # Application server. `make up` exposes it on http://localhost:8080.
+  app:
+    build:
+      context: .
+      dockerfile: docker/php-fpm.Dockerfile
+    environment:
+      MATCHDECK_DSN: "mysql:host=mysql;dbname=mathdeck;charset=utf8mb4"
+      MATCHDECK_DB_USER: mathdeck
+      MATCHDECK_DB_PASSWORD: mathdeck
+      APP_DEBUG: "1"
+      MATCHDECK_TOKEN_SECRET: "dev-secret-not-for-production-0123456789abcdef"
+    volumes:
+      - .:/app
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # Projections run here, never in the request path.
+  worker:
+    build:
+      context: .
+      dockerfile: docker/test.Dockerfile
+    environment:
+      MATCHDECK_DSN: "mysql:host=mysql;dbname=mathdeck;charset=utf8mb4"
+      MATCHDECK_DB_USER: mathdeck
+      MATCHDECK_DB_PASSWORD: mathdeck
+      MATCHDECK_TOKEN_SECRET: "dev-secret-not-for-production-0123456789abcdef"
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: ["php", "bin/project-analytics", "--loop"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - .:/app:ro
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
