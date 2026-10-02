@@ -5,6 +5,13 @@ FROM composer:2 AS vendor
 
 WORKDIR /app
 COPY composer.json composer.lock ./
+
+# The application's own source has to be here before the autoloader is generated.
+# --classmap-authoritative builds a static map and switches PSR-4 fallback off, so
+# a classmap built without src/ cannot load a single application class — and fails
+# at runtime rather than at build time.
+COPY src ./src
+
 RUN composer install \
         --no-dev \
         --no-scripts \
