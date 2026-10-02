@@ -1,3 +1,12 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+    /* Native controls — selects, date pickers, checkboxes, scrollbars — are drawn
+       by the browser, and no utility class reaches them. Without this they stay
+       stubbornly light on a dark page. */
+    :root {
+        color-scheme: light dark;
+    }
+}

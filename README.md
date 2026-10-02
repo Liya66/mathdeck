@@ -333,8 +333,12 @@ checked with the palette validator in ordinal mode for both modes. Marks carry
 colour; text always wears ink tokens. Charts are drawn at the container's real pixel
 width rather than scaled into it — a squeezed viewBox shrinks the type with it.
 
-*Known gap:* the dashboard has light and dark modes; the game and editor are
-light-only.
+All three surfaces follow the operating system's light/dark setting. The dashboard
+drives its chart marks from CSS custom properties, because an SVG fill needs a named
+role; the game and editor use Tailwind's `dark:` variants, because ordinary chrome
+does not. Both respond to the same `prefers-color-scheme` signal, and `color-scheme:
+light dark` is declared so the browser themes native controls — selects, date
+pickers, checkboxes, scrollbars — which no utility class can reach.
 
 ## Hardening (phase 8)
 
@@ -523,6 +527,7 @@ Built:
 - [x] Pseudonymous analytics keys, resolved only for a teacher
 - [x] Mutation testing, coverage gate, CI, production image, security headers
 - [x] Throttled sign-in, idempotent match creation
+- [x] Dark mode across all three surfaces
 
 Not here yet:
 

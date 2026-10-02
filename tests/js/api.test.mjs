@@ -35,6 +35,34 @@ test('no seed is ever sent when creating a match', async () => {
   assert.equal(JSON.parse(calls[0].options.body).seed, undefined);
 });
 
+test('creating a match carries an idempotency key too', async () => {
+  // The server requires it, and a slow response to "new match" is exactly what
+  // makes someone tap again.
+  const { fetchImpl, calls } = stubFetch(() => ok({}));
+
+  await new MatchApi({ token: 'alice', fetchImpl }).createMatch('deck-v1', ['alice', 'bob']);
+
+  assert.match(calls[0].options.headers['Idempotency-Key'], /\S/);
+});
+
+test('a retried create reuses its key, so it cannot make two matches', async () => {
+  const { fetchImpl, calls } = stubFetch((attempt) => {
+    if (attempt === 1) {
+      throw new TypeError('network down');
+    }
+
+    return ok({ matchId: 'm1' });
+  });
+
+  await new MatchApi({ token: 'alice', fetchImpl }).createMatch('deck-v1', ['alice', 'bob']);
+
+  assert.equal(calls.length, 2);
+  assert.equal(
+    calls[0].options.headers['Idempotency-Key'],
+    calls[1].options.headers['Idempotency-Key'],
+  );
+});
+
 test('commands carry an idempotency key', async () => {
   const { fetchImpl, calls } = stubFetch(() => ok({}));
 

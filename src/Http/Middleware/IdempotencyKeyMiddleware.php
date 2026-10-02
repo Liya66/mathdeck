@@ -34,7 +34,7 @@ final readonly class IdempotencyKeyMiddleware implements MiddlewareInterface
         $key = trim($request->getHeaderLine(self::HEADER));
 
         if ($key === '') {
-            throw BadRequest::because(sprintf('A %s header is required on this request.', self::HEADER));
+            throw BadRequest::because(sprintf('An %s header is required on this request.', self::HEADER));
         }
 
         if (strlen($key) > self::MAX_LENGTH) {

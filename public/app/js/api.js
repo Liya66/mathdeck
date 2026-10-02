@@ -23,7 +23,7 @@ export class MatchApi {
   }
 
   createMatch(deckVersionId, playerIds) {
-    return this.#send('POST', '/v1/matches', { body: { deckVersionId, playerIds } });
+    return this.#idempotent('/v1/matches', { deckVersionId, playerIds });
   }
 
   getMatch(matchId) {
@@ -49,19 +49,28 @@ export class MatchApi {
    * well have reached the server, and a retry that invented a fresh key would play
    * the hand a second time.
    */
-  async #command(matchId, command) {
+  #command(matchId, command) {
+    return this.#idempotent(`/v1/matches/${encodeURIComponent(matchId)}/commands`, command);
+  }
+
+  /**
+   * One key per intent, generated once and reused by the retry.
+   *
+   * Creating a match needs this as much as playing a hand does — arguably more,
+   * since a slow response to "new match" is exactly what makes someone tap again.
+   */
+  async #idempotent(path, body) {
     const idempotencyKey = newKey();
-    const path = `/v1/matches/${encodeURIComponent(matchId)}/commands`;
 
     try {
-      return await this.#send('POST', path, { body: command, idempotencyKey });
+      return await this.#send('POST', path, { body, idempotencyKey });
     } catch (failure) {
       if (failure instanceof ApiError) {
         throw failure;
       }
 
       // A transport failure, so we cannot know whether the server saw it. Same key.
-      return this.#send('POST', path, { body: command, idempotencyKey });
+      return this.#send('POST', path, { body, idempotencyKey });
     }
   }
 
